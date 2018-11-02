@@ -24,11 +24,14 @@ import signal
 from time import sleep
 
 parser = argparse.ArgumentParser(
-    description="Summarize cache references and misses by PID",
+    description="Summarize cache references and misses by postgres backend",
     formatter_class=argparse.RawDescriptionHelpFormatter)
 parser.add_argument(
     "-c", "--sample_period", type=int, default=100,
     help="Sample one in this many number of cache reference / miss events")
+parser.add_argument(
+    "-p", "--postgres_path", type=str,
+    help="Path to the postgres binary")
 parser.add_argument(
     "duration", nargs="?", default=10, help="Duration, in seconds, to run")
 parser.add_argument("--ebpf", action="store_true",
@@ -118,7 +121,7 @@ if args.ebpf:
 
 b = BPF(text=bpf_text)
 b.attach_uprobe(
-    name=binary_path,
+    name=args.postgres_path,
     sym="exec_simple_query",
     fn_name="probe_exec_simple_query")
 b.attach_perf_event(
