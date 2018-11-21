@@ -113,6 +113,12 @@ void probe_exec_simple_query(struct pt_regs *ctx, const char *query_string)
     bpf_probe_read(&data.query, QUERY_LEN, &(*query_string));
     queries.update(&pid, &data);
 }
+
+void probe_exec_simple_query_finish(struct pt_regs *ctx)
+{
+    u32 pid = bpf_get_current_pid_tgid();
+    queries.delete(&pid);
+}
 """
 
 if args.ebpf:
@@ -124,6 +130,10 @@ b.attach_uprobe(
     name=args.postgres_path,
     sym="exec_simple_query",
     fn_name="probe_exec_simple_query")
+b.attach_uretprobe(
+    name=args.postgres_path,
+    sym="exec_simple_query",
+    fn_name="probe_exec_simple_query_finish")
 b.attach_perf_event(
     ev_type=PerfType.HARDWARE, ev_config=PerfHWConfig.CACHE_MISSES,
     fn_name="on_cache_miss", sample_period=args.sample_period)
