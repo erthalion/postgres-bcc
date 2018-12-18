@@ -79,8 +79,21 @@ def print_stack(bpf, stack_id, tgid):
     for addr in stack:
         print("        ", end="")
         print("%16x " % addr, end="")
-        print("%s" % (bpf.sym(addr, tgid,
-                             show_module=True, show_offset=True)))
+        print("%s" % (bpf.sym(addr, tgid)))
+
+
+def stack_from_wal(bpf, stack_id, tgid):
+    if stack_id < 0:
+        return False
+
+    stack = list(bpf.get_table("stack_traces").walk(stack_id))
+    for addr in stack:
+        sym = bpf.sym(addr, tgid)
+        if sym == b"XLogBackgroundFlush":
+            return True
+
+    return False
+
 
 if args.ebpf:
     print(bpf_text)
@@ -110,8 +123,6 @@ print("Detaching...")
 print()
 
 for (k, v) in b.get_table('query_stacks').items():
-    if v.value < 0:
-        continue
-
-    print("PID: {}".format(k.value))
-    print_stack(b, v.value, k.value)
+    if stack_from_wal(b, v.value, k.value):
+        print("PID: {}".format(k.value))
+        print_stack(b, v.value, k.value)
