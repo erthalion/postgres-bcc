@@ -18,6 +18,10 @@ import sys
 text = """
 #include <linux/ptrace.h>
 
+struct key_t {
+    char device[10];
+};
+
 struct net_data {
     u32 pid;
     u32 __padding;
@@ -28,7 +32,7 @@ struct net_data {
 #define    IFNAMSIZ    16
 
 struct net_device {
-    char            name[10];
+    char name[10];
 };
 
 struct sk_buff {
@@ -87,12 +91,14 @@ struct sk_buff {
 
 BPF_PERF_OUTPUT(events);
 
-void probe_dev_hard_start_xmit(struct pt_regs *ctx)
+BPF_HASH(net_data_hash, struct key_t);
+
+int probe_dev_hard_start_xmit(struct pt_regs *ctx)
 {
-    u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid();
     struct sk_buff buff = {};
     struct net_device device = {};
+    struct key_t key = {};
     bpf_probe_read(&buff,
                     sizeof(buff),
                     ((struct sk_buff *)PT_REGS_PARM1(ctx)));
@@ -107,7 +113,16 @@ void probe_dev_hard_start_xmit(struct pt_regs *ctx)
     bpf_probe_read(&data.device,
                     IFNAMSIZ,
                     device.name);
+    bpf_probe_read(&key.device,
+                    IFNAMSIZ,
+                    device.name);
+
+    u64 zero = 0, *val;
+    val = net_data_hash.lookup_or_init(&key, &zero);
+    (*val) += buff.len;
+
     events.perf_submit(ctx, &data, sizeof(data));
+    return 0;
 }
 """
 
@@ -156,6 +171,10 @@ def run(args):
         if exiting:
             print("Detaching...")
             break
+
+    print("Total")
+    for (k, v) in bpf.get_table('net_data_hash').items():
+        print('{}: {}'.format(k.device, v.value))
 
 
 def parse_args():
