@@ -21,18 +21,68 @@ text = """
 struct net_data {
     u32 pid;
     u32 __padding;
+    unsigned int len;
     char device[10];
 };
 
-#define	IFNAMSIZ	16
+#define    IFNAMSIZ    16
 
 struct net_device {
     char            name[10];
 };
 
-struct dev_ifalias {
-    struct rcu_head rcuhead;
-    char ifalias[];
+struct sk_buff {
+    union {
+        struct {
+            /* These two members must be first. */
+            struct sk_buff        *next;
+            struct sk_buff        *prev;
+
+            union {
+                struct net_device    *dev;
+                /* Some protocols might use this space to store information,
+                 * while device pointer would be NULL.
+                 * UDP receive path is one user.
+                 */
+                unsigned long        dev_scratch;
+            };
+        };
+        struct rb_node        rbnode; /* used in netem, ip4 defrag, and tcp stack */
+        struct list_head    list;
+    };
+
+    union {
+        struct sock        *sk;
+        int            ip_defrag_offset;
+    };
+
+    union {
+        ktime_t        tstamp;
+        u64        skb_mstamp_ns; /* earliest departure time */
+    };
+    /*
+     * This is the control buffer. It is free to use for every
+     * layer. Please put your private variables there. If you
+     * want to keep them across layers you have to do a skb_clone()
+     * first. This is owned by whoever has the skb queued ATM.
+     */
+    char            cb[48] __aligned(8);
+
+    union {
+        struct {
+            unsigned long    _skb_refdst;
+            void        (*destructor)(struct sk_buff *skb);
+        };
+        struct list_head    tcp_tsorted_anchor;
+    };
+
+    struct    sec_path    *sp;
+    unsigned long         _nfct;
+    struct nf_bridge_info    *nf_bridge;
+    unsigned int        len,
+                data_len;
+    __u16            mac_len,
+                hdr_len;
 };
 
 BPF_PERF_OUTPUT(events);
@@ -41,13 +91,19 @@ void probe_dev_hard_start_xmit(struct pt_regs *ctx)
 {
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid();
+    struct sk_buff buff = {};
     struct net_device device = {};
+    bpf_probe_read(&buff,
+                    sizeof(buff),
+                    ((struct sk_buff *)PT_REGS_PARM1(ctx)));
+
     bpf_probe_read(&device,
                     sizeof(device),
                     ((struct net_device *)PT_REGS_PARM2(ctx)));
 
     struct net_data data = {};
     data.pid = pid;
+    data.len = buff.len;
     bpf_probe_read(&data.device,
                     IFNAMSIZ,
                     device.name);
@@ -69,12 +125,13 @@ def signal_ignore(signal, frame):
 
 class Data(ct.Structure):
     _fields_ = [("pid", ct.c_ulong),
+                ("len", ct.c_uint),
                 ("device", ct.c_char * 10)]
 
 
 def print_event(cpu, data, size):
     event = ct.cast(data, ct.POINTER(Data)).contents
-    print("Event: pid {} device {}".format(event.pid, event.device))
+    print("Event: pid {} device {} len {}".format(event.pid, event.device, event.len))
 
 
 def run(args):
