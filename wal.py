@@ -33,9 +33,9 @@ bpf_text="""
 
 struct key_t {
     int cpu;
-    int pid;
+    u32 pid;
+    int user_stack_id;
     char name[TASK_COMM_LEN];
-    char query[QUERY_LEN];
 };
 
 struct backend {
@@ -43,15 +43,22 @@ struct backend {
     char query[QUERY_LEN];
 };
 
-BPF_HASH(query_stacks, u32, int);
+BPF_HASH(query_stacks, struct key_t, int);
 BPF_HASH(queries, u32, struct backend, HASH_SIZE);
 BPF_STACK_TRACE(stack_traces, STACK_STORAGE_SIZE);
 
 int syscall__pwrite(struct bpf_perf_event_data *ctx) {
     struct key_t key = {};
-    u32 pid = bpf_get_current_pid_tgid();
-    int user_stack_id = stack_traces.get_stackid(&ctx->regs, BPF_F_USER_STACK);
-    query_stacks.update(&pid, &user_stack_id);
+    key.pid = bpf_get_current_pid_tgid();
+    key.user_stack_id = stack_traces.get_stackid(&ctx->regs, BPF_F_USER_STACK);
+    bpf_get_current_comm(&(key.name), sizeof(key.name));
+    int len = (int) PT_REGS_PARM3(&ctx->regs);
+
+    query_stacks.update(&key, &len);
+    int zero = 0, *val;
+    val = query_stacks.lookup_or_init(&key, &zero);
+    (*val) += len;
+
     return 0;
 }
 
@@ -123,6 +130,6 @@ print("Detaching...")
 print()
 
 for (k, v) in b.get_table('query_stacks').items():
-    if stack_from_wal(b, v.value, k.value):
-        print("PID: {}".format(k.value))
-        print_stack(b, v.value, k.value)
+    if stack_from_wal(b, k.user_stack_id, k.pid):
+        print("PID: {}, NAME: {}, LEN: {}".format(k.pid, k.name, v.value))
+        print_stack(b, k.user_stack_id, k.pid)
