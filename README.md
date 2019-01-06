@@ -34,8 +34,6 @@ writeback throttling by Linux kernel.
 
 * Miscellaneous
 
-Consists of:
-
     * `futex` to measure a hash bucket size for futexes to see how PGSemaphore are
       affected by lock contention (since every bucket is protected by spin lock).
 
