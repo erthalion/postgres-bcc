@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 #
 # futex   Display size of hash buckets that are used for futexes (and
-#         transitively for PGSemathore). For Linux, uses BCC, eBPF.
+#         transitively for PGSemathore). This information is important
+#         to see under high contention, since every bucker is protected
+#         by spin lock and contributes to locking overhead. For Linux,
+#         uses BCC, eBPF.
 #
-# usage: futex [-p PID] [-d]
+# usage: futex [-l SIZE_LIMIT] [-d]
 
 
 from __future__ import print_function
@@ -16,7 +19,7 @@ import signal
 import sys
 
 
-text = """
+bpf_text = """
 #include <linux/ptrace.h>
 
 struct futex_hash_bucket {
@@ -98,16 +101,14 @@ void probe_unqueue_futex(struct pt_regs *ctx)
                     ((struct futex_hash_bucket *)hb));
     data.hash_bucket = (u32) futex_hash_bucket_tmp.waiters.counter;
 
-    if (data.hash_bucket > 3)
+    if (data.hash_bucket > BUCKET_SIZE_LIMIT)
         events.perf_submit(ctx, &data, sizeof(data));
 }
 """
 
 
 def attach(bpf):
-    bpf.attach_kprobe(
-        event="__unqueue_futex",
-        fn_name="probe_unqueue_futex")
+    bpf.attach_kprobe(event="__unqueue_futex", fn_name="probe_unqueue_futex")
 
 
 # signal handler
@@ -124,26 +125,31 @@ class Data(ct.Structure):
 
 def print_event(cpu, data, size):
     event = ct.cast(data, ct.POINTER(Data)).contents
+    if event.name != b'postgres':
+        return
+
     print("Event: timestamp {} pid {} hash_bucket {}, name {}".format(
         event.timestamp, event.pid, event.hash_bucket, event.name))
+
+
+def pre_process(text, args):
+    return text.replace("BUCKET_SIZE_LIMIT", str(args.size_limit))
 
 
 def run(args):
     print("Attaching...")
     debug = 4 if args.debug else 0
-    bpf = BPF(text=text, debug=debug)
+    bpf = BPF(text=pre_process(bpf_text, args), debug=debug)
     attach(bpf)
     exiting = False
 
-    if args.debug:
-        bpf["events"].open_perf_buffer(print_event)
+    bpf["events"].open_perf_buffer(print_event)
 
     print("Listening...")
     while True:
         try:
             sleep(1)
-            if args.debug:
-                bpf.perf_buffer_poll()
+            bpf.perf_buffer_poll()
         except KeyboardInterrupt:
             exiting = True
             # as cleanup can take many seconds, trap Ctrl-C:
@@ -158,8 +164,8 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Hash bucket size for futexes",
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("-p", "--pid", type=int, default=-1,
-            help="trace this PID only")
+    parser.add_argument("-l", "--size-limit", type=int, default=0,
+            help="Display only hash buckets with size more than this limit")
     parser.add_argument("-d", "--debug", action='store_true', default=False,
             help="debug mode")
 
