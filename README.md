@@ -36,11 +36,11 @@ writeback throttling by Linux kernel.
 
 Consists of:
 
-- `futex` to measure a hash bucket size for futexes to see how PGSemaphore are
-  affected by lock contention (since every bucket is protected by spin lock).
+    - `futex` to measure a hash bucket size for futexes to see how PGSemaphore are
+      affected by lock contention (since every bucket is protected by spin lock).
 
-- `stacktrace` convenient tool to check if some particular Linux kernel
-  function was called and corresponding event is happened.
+    - `stacktrace` convenient tool to check if some particular Linux kernel
+      function was called and corresponding event is happened.
 
 To run these script you need to have bcc installed and relatively new Linux
 kernel.
