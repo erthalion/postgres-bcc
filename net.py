@@ -1,42 +1,15 @@
 #!/usr/bin/python
 #
-# query_cache.py Summarize cache references and cache misses by postgres backend.
-#                Cache reference and cache miss are corresponding events defined in
-#                uapi/linux/perf_event.h, it varies to different architecture.
-#                On x86-64, they mean LLC references and LLC misses. Postgres
-#                backend provides a query string. Based on llstat.py from bcc.
+# net.py        Summarize network usage per query/backend. For Linux, uses BCC,
+#               eBPF.
 #
-#                For Linux, uses BCC, eBPF.
-#
-# SEE ALSO: perf top -e cache-misses -e cache-references -a -ns pid,cpu,comm
-#
-# REQUIRES: Linux 4.9+ (BPF_PROG_TYPE_PERF_EVENT support).
-#
-# Copyright (c) 2016 Facebook, Inc.
-# Licensed under the Apache License, Version 2.0 (the "License")
-#
-# 19-Oct-2016   Teng Qin   Created this.
+# usage: net.py $PG_BIN/postgres [-d] [-p PID]
 
 from __future__ import print_function
 import argparse
 from bcc import BPF, PerfType, PerfHWConfig
 import signal
 from time import sleep
-
-parser = argparse.ArgumentParser(
-    description="Summarize cache references and misses by postgres backend",
-    formatter_class=argparse.RawDescriptionHelpFormatter)
-parser.add_argument(
-    "-c", "--sample_period", type=int, default=100,
-    help="Sample one in this many number of cache reference / miss events")
-parser.add_argument(
-    "-p", "--postgres_path", type=str,
-    help="Path to the postgres binary")
-parser.add_argument(
-    "duration", nargs="?", default=10, help="Duration, in seconds, to run")
-parser.add_argument("--ebpf", action="store_true",
-    help=argparse.SUPPRESS)
-args = parser.parse_args()
 
 def get_pid_cmdline(pid):
     try:
@@ -122,19 +95,36 @@ bpf_text="""
 #include <uapi/linux/bpf_perf_event.h>
 
 #define HASH_SIZE 2^14
+#define QUERY_LEN 100
 
 struct key_t {
     int pid;
     char name[TASK_COMM_LEN];
+    char query[QUERY_LEN];
 };
+
+struct backend {
+    int pid;
+    char query[QUERY_LEN];
+};
+
 
 BPF_HASH(send, struct key_t);
 BPF_HASH(recv, struct key_t);
+BPF_HASH(queries, u32, struct backend, HASH_SIZE);
+
+static inline __attribute__((always_inline)) void get_key(struct key_t* key) {
+    key->pid = bpf_get_current_pid_tgid();
+    struct backend *data = queries.lookup(&(key->pid));
+
+    bpf_get_current_comm(&(key->name), sizeof(key->name));
+    if (data != NULL)
+        bpf_probe_read(&(key->query), QUERY_LEN, &(data->query));
+}
 
 int on_recv(struct pt_regs *ctx) {
     struct key_t key = {};
-    key.pid = bpf_get_current_pid_tgid();
-    bpf_get_current_comm(&(key.name), sizeof(key.name));
+    get_key(&key);
 
     u64 zero = 0, *val;
     val = recv.lookup_or_init(&key, &zero);
@@ -145,8 +135,7 @@ int on_recv(struct pt_regs *ctx) {
 
 int on_send(struct pt_regs *ctx) {
     struct key_t key = {};
-    key.pid = bpf_get_current_pid_tgid();
-    bpf_get_current_comm(&(key.name), sizeof(key.name));
+    get_key(&key);
 
     u64 zero = 0, *val;
     val = send.lookup_or_init(&key, &zero);
@@ -154,33 +143,98 @@ int on_send(struct pt_regs *ctx) {
 
     return 0;
 }
+
+void probe_exec_simple_query(struct pt_regs *ctx, const char *query_string)
+{
+    u32 pid = bpf_get_current_pid_tgid();
+    struct backend data = {};
+    data.pid = pid;
+    bpf_probe_read(&data.query, QUERY_LEN, &(*query_string));
+    queries.update(&pid, &data);
+}
+
+void probe_exec_simple_query_finish(struct pt_regs *ctx)
+{
+    u32 pid = bpf_get_current_pid_tgid();
+    queries.delete(&pid);
+}
 """
 
-if args.ebpf:
-    print(bpf_text)
-    exit()
+# signal handler
+def signal_ignore(signal, frame):
+    print()
 
-b = BPF(text=bpf_text, debug=4)
-b.attach_kprobe(event="sys_sendto", fn_name="on_send")
-b.attach_kprobe(event="sys_send", fn_name="on_send")
-b.attach_kprobe(event="sys_recvfrom", fn_name="on_recv")
-b.attach_kprobe(event="sys_recv", fn_name="on_recv")
 
-print("Running for {} seconds or hit Ctrl-C to end.".format(args.duration))
+def print_result(name, table):
+    print(name)
+    for (k, v) in table.items():
+        if k.name == b"postgres":
+            backend = k.query.decode("ascii") or get_pid_cmdline(k.pid)
+            print("{} {}: {}".format(k.pid, backend, size(v.value)))
+    print()
 
-try:
-    sleep(float(args.duration))
-except KeyboardInterrupt:
-    signal.signal(signal.SIGINT, lambda signal, frame: print())
 
-print("Send")
-for (k, v) in b.get_table('send').items():
-    if k.name == b"postgres":
-        print("{} {}: {}".format(k.pid, get_pid_cmdline(k.pid), size(v.value)))
+def attach(bpf, args):
+    bpf.attach_uprobe(
+        name=args.path,
+        sym="exec_simple_query",
+        fn_name="probe_exec_simple_query",
+        pid=args.pid)
+    bpf.attach_uretprobe(
+        name=args.path,
+        sym="exec_simple_query",
+        fn_name="probe_exec_simple_query_finish",
+        pid=args.pid)
 
-print()
+    bpf.attach_kprobe(event="sys_sendto", fn_name="on_send")
+    bpf.attach_kprobe(event="sys_send", fn_name="on_send")
+    bpf.attach_kprobe(event="sys_recvfrom", fn_name="on_recv")
+    bpf.attach_kprobe(event="sys_recv", fn_name="on_recv")
 
-print("Receive")
-for (k, v) in b.get_table('recv').items():
-    if k.name == b"postgres":
-        print("{} {}: {}".format(k.pid, get_pid_cmdline(k.pid), size(v.value)))
+
+def run(args):
+    print("Attaching...")
+    debug = 4 if args.debug else 0
+    bpf = BPF(text=bpf_text, debug=debug)
+    attach(bpf, args)
+    exiting = False
+
+    if args.debug:
+        bpf["events"].open_perf_buffer(print_event)
+
+    print("Listening...")
+    while True:
+        try:
+            sleep(1)
+            if args.debug:
+                bpf.perf_buffer_poll()
+        except KeyboardInterrupt:
+            exiting = True
+            # as cleanup can take many seconds, trap Ctrl-C:
+            signal.signal(signal.SIGINT, signal_ignore)
+
+        if exiting:
+            print()
+            print("Detaching...")
+            print()
+            break
+
+    print_result("Send", bpf.get_table('send'))
+    print_result("Receive", bpf.get_table('recv'))
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Summarize network usage per query/backend",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("path", type=str, help="path to PostgreSQL binary")
+    parser.add_argument("-p", "--pid", type=int, default=-1,
+            help="trace this PID only")
+    parser.add_argument("-d", "--debug", action='store_true', default=False,
+        help="debug mode")
+
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    run(parse_args())
