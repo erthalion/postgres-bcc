@@ -5,17 +5,11 @@
 #                uapi/linux/perf_event.h, it varies to different architecture.
 #                On x86-64, they mean LLC references and LLC misses. Postgres
 #                backend provides a query string. Based on llstat.py from bcc.
-#
 #                For Linux, uses BCC, eBPF.
 #
 # SEE ALSO: perf top -e cache-misses -e cache-references -a -ns pid,cpu,comm
 #
 # REQUIRES: Linux 4.9+ (BPF_PROG_TYPE_PERF_EVENT support).
-#
-# Copyright (c) 2016 Facebook, Inc.
-# Licensed under the Apache License, Version 2.0 (the "License")
-#
-# 19-Oct-2016   Teng Qin   Created this.
 
 from __future__ import print_function
 import argparse
@@ -23,20 +17,6 @@ from bcc import BPF, PerfType, PerfHWConfig
 import signal
 from time import sleep
 
-parser = argparse.ArgumentParser(
-    description="Summarize cache references and misses by postgres backend",
-    formatter_class=argparse.RawDescriptionHelpFormatter)
-parser.add_argument(
-    "-c", "--sample_period", type=int, default=100,
-    help="Sample one in this many number of cache reference / miss events")
-parser.add_argument(
-    "-p", "--postgres_path", type=str,
-    help="Path to the postgres binary")
-parser.add_argument(
-    "duration", nargs="?", default=10, help="Duration, in seconds, to run")
-parser.add_argument("--ebpf", action="store_true",
-    help=argparse.SUPPRESS)
-args = parser.parse_args()
 
 # load BPF program
 bpf_text="""
@@ -121,52 +101,98 @@ void probe_exec_simple_query_finish(struct pt_regs *ctx)
 }
 """
 
-if args.ebpf:
-    print(bpf_text)
-    exit()
 
-b = BPF(text=bpf_text)
-b.attach_uprobe(
-    name=args.postgres_path,
-    sym="exec_simple_query",
-    fn_name="probe_exec_simple_query")
-b.attach_uretprobe(
-    name=args.postgres_path,
-    sym="exec_simple_query",
-    fn_name="probe_exec_simple_query_finish")
-b.attach_perf_event(
-    ev_type=PerfType.HARDWARE, ev_config=PerfHWConfig.CACHE_MISSES,
-    fn_name="on_cache_miss", sample_period=args.sample_period)
-b.attach_perf_event(
-    ev_type=PerfType.HARDWARE, ev_config=PerfHWConfig.CACHE_REFERENCES,
-    fn_name="on_cache_ref", sample_period=args.sample_period)
+# signal handler
+def signal_ignore(signal, frame):
+    print()
 
-print("Running for {} seconds or hit Ctrl-C to end.".format(args.duration))
 
-try:
-    sleep(float(args.duration))
-except KeyboardInterrupt:
-    signal.signal(signal.SIGINT, lambda signal, frame: print())
+def attach(bpf, args):
+    bpf.attach_uprobe(
+        name=args.path,
+        sym="exec_simple_query",
+        fn_name="probe_exec_simple_query")
+    bpf.attach_uretprobe(
+        name=args.path,
+        sym="exec_simple_query",
+        fn_name="probe_exec_simple_query_finish")
+    bpf.attach_perf_event(
+        ev_type=PerfType.HARDWARE, ev_config=PerfHWConfig.CACHE_MISSES,
+        fn_name="on_cache_miss", sample_period=args.sample_period)
+    bpf.attach_perf_event(
+        ev_type=PerfType.HARDWARE, ev_config=PerfHWConfig.CACHE_REFERENCES,
+        fn_name="on_cache_ref", sample_period=args.sample_period)
 
-miss_count = {}
-for (k, v) in b.get_table('miss_count').items():
-    miss_count[(k.pid, k.cpu, k.name)] = v.value
 
-print('PID      NAME            QUERY                                                                                               CPU     REFERENCE         MISS    HIT%')
-tot_ref = 0
-tot_miss = 0
-for (k, v) in b.get_table('ref_count').items():
-    try:
-        miss = miss_count[(k.pid, k.cpu, k.name)]
-    except KeyError:
-        miss = 0
-    tot_ref += v.value
-    tot_miss += miss
-    # This happens on some PIDs due to missed counts caused by sampling
-    hit = (v.value - miss) if (v.value >= miss) else 0
-    print('{:<8d} {:<16s} {:<100s} {:<4d} {:>12d} {:>12d} {:>6.2f}%'.format(
-        k.pid, k.name.decode(), k.query.decode(), k.cpu, v.value, miss,
-        (float(hit) / float(v.value)) * 100.0))
-if tot_ref != 0:
-    print('Total References: {} Total Misses: {} Hit Rate: {:.2f}%'.format(
-        tot_ref, tot_miss, (float(tot_ref - tot_miss) / float(tot_ref)) * 100.0))
+def run(args):
+    print("Attaching...")
+    debug = 4 if args.debug else 0
+    bpf = BPF(text=bpf_text, debug=debug)
+    attach(bpf, args)
+    exiting = False
+
+    if args.debug:
+        bpf["events"].open_perf_buffer(print_event)
+
+    print("Listening...")
+    while True:
+        try:
+            sleep(1)
+            if args.debug:
+                bpf.perf_buffer_poll()
+        except KeyboardInterrupt:
+            exiting = True
+            # as cleanup can take many seconds, trap Ctrl-C:
+            signal.signal(signal.SIGINT, signal_ignore)
+
+        if exiting:
+            print()
+            print("Detaching...")
+            print()
+            break
+
+    miss_count = {}
+    for (k, v) in bpf.get_table('miss_count').items():
+        miss_count[(k.pid, k.cpu, k.name)] = v.value
+
+    print('{:<8} {:<16} {:<100} {:<4} {:>12} {:>12} {:>6}%'.format(
+        "PID", "NAME", "QUERY", "CPU", "REFERENCE", "MISS", "HIT"))
+    tot_ref = 0
+    tot_miss = 0
+    for (k, v) in bpf.get_table('ref_count').items():
+        try:
+            miss = miss_count[(k.pid, k.cpu, k.name)]
+        except KeyError:
+            miss = 0
+        tot_ref += v.value
+        tot_miss += miss
+        # This happens on some PIDs due to missed counts caused by sampling
+        hit = (v.value - miss) if (v.value >= miss) else 0
+        print('{:<8d} {:<16s} {:<100s} {:<4d} {:>12d} {:>12d} {:>6.2f}%'.format(
+            k.pid, k.name.decode(), k.query.decode(), k.cpu, v.value, miss,
+            (float(hit) / float(v.value)) * 100.0))
+
+    if tot_ref != 0:
+        print()
+        print('Total References: {} Total Misses: {} Hit Rate: {:.2f}%'.format(
+            tot_ref, tot_miss, (float(tot_ref - tot_miss) / float(tot_ref)) * 100.0))
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Summarize cache references and misses by postgres backend",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("path", type=str, help="path to PostgreSQL binary")
+    parser.add_argument(
+        "-c", "--sample_period", type=int, default=100,
+        help="Sample one in this many number of cache reference / miss events")
+    parser.add_argument("--ebpf", action="store_true",
+        help=argparse.SUPPRESS)
+    parser.add_argument("-d", "--debug", action='store_true', default=False,
+            help="debug mode")
+
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    run(parse_args())
