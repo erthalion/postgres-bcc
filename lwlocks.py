@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# lwlocks    Time LWLocks in PostgreSQL and print wait/hold time
+# lwlocks    Track LWLocks in PostgreSQL and print wait/hold time
 #            as a histogram. For Linux, uses BCC, eBPF.
 #
 # usage: lwlocks BIN_PATH [-p PID] [-d]
@@ -190,7 +190,10 @@ void probe_lwlock_release(struct pt_regs *ctx, struct LWLock *lock)
 """
 
 
-def attach(bpf, binary_path, pid=-1):
+def attach(bpf, args):
+    binary_path = args.path
+    pid = args.pid
+
     bpf.attach_uprobe(
         name=binary_path,
         sym="LWLockAcquire",
@@ -272,7 +275,7 @@ def run(args):
     print("Attaching...")
     debug = 4 if args.debug else 0
     bpf = BPF(text=text, debug=debug)
-    attach(bpf, args.path, args.pid)
+    attach(bpf, args)
     lock_hold_exclusive_hist = bpf["lock_hold_exclusive_hist"]
     lock_hold_shared_hist = bpf["lock_hold_shared_hist"]
     lock_wait_exclusive_hist = bpf["lock_wait_exclusive_hist"]

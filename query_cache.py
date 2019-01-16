@@ -5,11 +5,12 @@
 #                uapi/linux/perf_event.h, it varies to different architecture.
 #                On x86-64, they mean LLC references and LLC misses. Postgres
 #                backend provides a query string. Based on llstat.py from bcc.
-#                For Linux, uses BCC, eBPF.
+#                For Linux, uses BCC.
 #
 # SEE ALSO: perf top -e cache-misses -e cache-references -a -ns pid,cpu,comm
 #
 # REQUIRES: Linux 4.9+ (BPF_PROG_TYPE_PERF_EVENT support).
+# usage: query_cache $PG_BIN/postgres [-d] [-c] [-p PID]
 
 from __future__ import print_function
 import argparse
@@ -108,14 +109,19 @@ def signal_ignore(signal, frame):
 
 
 def attach(bpf, args):
+    binary_path = args.path
+    pid = args.pid
+
     bpf.attach_uprobe(
-        name=args.path,
+        name=binary_path,
         sym="exec_simple_query",
-        fn_name="probe_exec_simple_query")
+        fn_name="probe_exec_simple_query",
+        pid=pid)
     bpf.attach_uretprobe(
-        name=args.path,
+        name=binary_path,
         sym="exec_simple_query",
-        fn_name="probe_exec_simple_query_finish")
+        fn_name="probe_exec_simple_query_finish",
+        pid=pid)
     bpf.attach_perf_event(
         ev_type=PerfType.HARDWARE, ev_config=PerfHWConfig.CACHE_MISSES,
         fn_name="on_cache_miss", sample_period=args.sample_period)
@@ -186,8 +192,8 @@ def parse_args():
     parser.add_argument(
         "-c", "--sample_period", type=int, default=100,
         help="Sample one in this many number of cache reference / miss events")
-    parser.add_argument("--ebpf", action="store_true",
-        help=argparse.SUPPRESS)
+    parser.add_argument("-p", "--pid", type=int, default=-1,
+            help="trace this PID only")
     parser.add_argument("-d", "--debug", action='store_true', default=False,
             help="debug mode")
 

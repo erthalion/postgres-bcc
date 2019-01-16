@@ -2,6 +2,7 @@
 #
 # query_wal.py   Summarize WAL writes by postgres backend.
 #                For Linux, uses BCC, eBPF.
+# usage: query_wal $PG_BIN/postgres [-d] [-p PID]
 
 
 from __future__ import print_function
@@ -122,18 +123,24 @@ def signal_ignore(signal, frame):
 
 
 def attach(bpf, args):
+    binary_path = args.path
+    pid = args.pid
+
     bpf.attach_uprobe(
-        name=args.path,
+        name=binary_path,
         sym="exec_simple_query",
-        fn_name="probe_exec_simple_query")
+        fn_name="probe_exec_simple_query",
+        pid=pid)
     bpf.attach_uretprobe(
-        name=args.path,
+        name=binary_path,
         sym="exec_simple_query",
-        fn_name="probe_exec_simple_query_finish")
+        fn_name="probe_exec_simple_query_finish",
+        pid=pid)
     bpf.attach_uprobe(
-        name=args.path,
+        name=binary_path,
         sym="XLogInsertRecord",
-        fn_name="probe_wal_insert_record")
+        fn_name="probe_wal_insert_record",
+        pid=pid)
 
 
 def run(args):
@@ -173,6 +180,8 @@ def parse_args():
         description="Summarize cache references and misses by postgres backend",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("path", type=str, help="path to PostgreSQL binary")
+    parser.add_argument("-p", "--pid", type=int, default=-1,
+            help="trace this PID only")
     parser.add_argument("-d", "--debug", action='store_true', default=False,
             help="debug mode")
 

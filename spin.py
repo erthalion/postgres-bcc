@@ -3,7 +3,7 @@
 # spin_locks    Time spin locks in PostgreSQL and print wait time
 #               as a histogram. For Linux, uses BCC, eBPF.
 #
-# usage: pg_spin_locks BIN_PATH [-p PID] [-d]
+# usage: spin_locks $PG_BIN/postgres [-p PID] [-d]
 
 from __future__ import print_function
 from time import sleep

@@ -3,7 +3,7 @@
 # sema    Time semaphore actions in PostgreSQL and print
 #         wait/hold time as a histogram. For Linux, uses BCC, eBPF.
 #
-# usage: sema BIN_PATH [-p PID] [-d]
+# usage: sema $PG_BIN/postgres [-p PID] [-d]
 
 
 from __future__ import print_function

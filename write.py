@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 #
-# stacktrace    Track provided event in the kernel and print user/kernel stack
+# write     Track how much data was written by backend type
 #
-# usage: stacktrace -p PGPATH -e event_name
+# usage: write -p PGPATH -e event_name
 
 
 from __future__ import print_function
@@ -111,12 +111,12 @@ static inline __attribute__((always_inline)) void get_key(struct key_t* key) {
     bpf_get_current_comm(&(key->name), sizeof(key->name));
 }
 
-int probe_event(struct pt_regs *ctx)
+int probe_vfs_write(struct pt_regs *ctx)
 {
     struct key_t key = {};
     get_key(&key);
 
-    key.user_stack_id = stack_traces.get_stackid(ctx, BPF_F_USER_STACK);
+    key.user_stack_id = stack_traces.get_stackid(ctx, BPF_F_REUSE_STACKID | BPF_F_USER_STACK);
     key.size = (size_t) PT_REGS_PARM3(ctx);
 
     size_t zero = 0, *val;
@@ -129,7 +129,7 @@ int probe_event(struct pt_regs *ctx)
 
 
 def attach(bpf, args):
-    bpf.attach_kprobe(event="vfs_write", fn_name="probe_event")
+    bpf.attach_kprobe(event="vfs_write", fn_name="probe_vfs_write")
 
 
 # signal handler
@@ -159,6 +159,7 @@ def print_stack(bpf, stack_id, tgid):
         print("%16x " % addr, end="")
         print("%s" % (bpf.sym(addr, tgid)))
 
+
 def event_category(bpf, user_stack_id, tgid):
     process = "unknown"
     action = "unknown"
@@ -169,60 +170,50 @@ def event_category(bpf, user_stack_id, tgid):
     stack = list(bpf.get_table("stack_traces").walk(user_stack_id))
     syms = {bpf.sym(addr, tgid) for addr in stack}
 
-    if syms.intersection({
-        b"XLogFlush",
-        b"AdvanceXLInsertBuffer",
-        b"XLogBackgroundFlush",
-    }):
+    def contains(*symbols):
+        return syms.intersection({s.encode("ascii", "ignore") for s in symbols})
+
+    if contains(
+        "XLogFlush",
+        "AdvanceXLInsertBuffer",
+        "XLogBackgroundFlush",
+    ):
         action = "xlog"
 
-    if syms.intersection({
-        b"send_message_to_server_log",
-    }):
+    if contains("send_message_to_server_log"):
         action = "log"
 
-    if syms.intersection({
-        b"SlruInternalWritePage",
-        b"mdextend",
-        b"mdwrite",
-    }):
+    if contains(
+        "SlruInternalWritePage",
+        "mdextend",
+        "mdwrite",
+    ):
         action = "heap"
 
-    if syms.intersection({
-        b"latch_sigusr1_handler",
-    }):
+    if contains("latch_sigusr1_handler"):
         action = "latch"
 
-    if syms.intersection({
-        b"exec_simple_query",
-    }):
+    if contains("exec_simple_query"):
         process = "backend"
 
-    if syms.intersection({
-        b"CheckpointerMain",
-    }):
+    if contains("CheckpointerMain"):
         process = "checkpointer"
 
-    if syms.intersection({
-        b"AutoVacLauncherMain",
-    }):
+    if contains("AutoVacLauncherMain"):
         process = "autovacuum"
 
-    if syms.intersection({
-        b"WalWriterMain",
-    }):
+    if contains("WalWriterMain"):
         process = "wal_writer"
 
-    if syms.intersection({
-        b"BackgroundWriterMain",
-    }):
+    if contains("BackgroundWriterMain"):
         process = "background_writer"
 
     return (action, process)
 
 def run(args):
     print("Attaching...")
-    bpf = BPF(text=text)
+    debug = 4 if args.debug else 0
+    bpf = BPF(text=text, debug=debug)
     attach(bpf, args)
     exiting = False
 
@@ -261,10 +252,11 @@ def run(args):
         category = "{},{}".format(process, action)
         data[category] = data.get(category, 0) + v.value
 
-        # print("[{}:{}:{}] {}: {}".format(
-            # k.name, k.pid, k.user_stack_id,
-            # event_category(bpf, k.user_stack_id, k.tgid), size(v.value)))
-        # print_stack(bpf, k.user_stack_id, k.tgid)
+        if args.debug
+            print("[{}:{}:{}] {}: {}".format(
+                k.name, k.pid, k.user_stack_id,
+                event_category(bpf, k.user_stack_id, k.tgid), size(v.value)))
+            print_stack(bpf, k.user_stack_id, k.tgid)
 
     for category, written in data.items():
         print("{}: {}".format(category, size(written)))
@@ -274,6 +266,8 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="",
         formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("-d", "--debug", action='store_true', default=False,
+            help="debug mode")
     return parser.parse_args()
 
 
