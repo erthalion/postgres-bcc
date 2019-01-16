@@ -2,7 +2,7 @@
 #
 # stacktrace    Track provided event in the kernel and print user/kernel stack
 #
-# usage: stacktrace -p PGPATH -e event_name
+# usage: stacktrace -e event_name
 
 
 from __future__ import print_function
@@ -54,7 +54,7 @@ int probe_event(struct pt_regs *ctx)
     struct key_t key = {};
     get_key(&key);
 
-    key.user_stack_id = stack_traces.get_stackid(ctx, BPF_F_USER_STACK);
+    key.user_stack_id = stack_traces.get_stackid(ctx, BPF_F_REUSE_STACKID | BPF_F_USER_STACK);
     key.kernel_stack_id = stack_traces.get_stackid(ctx, BPF_F_REUSE_STACKID);
 
     events.perf_submit(ctx, &key, sizeof(key));
@@ -104,7 +104,11 @@ def run(args):
 
     def print_event(cpu, data, size):
         event = ct.cast(data, ct.POINTER(Data)).contents
-        print("Event: pid {} query {}".format(event.pid, event.query))
+        name = event.name.decode("ascii")
+        if not name.startswith("postgres"):
+            return
+        print("Event: pid {} name {} query {}".format(
+            event.pid, event.name, event.query))
         print_kstack(bpf, event.kernel_stack_id, event.pid)
         print_stack(bpf, event.user_stack_id, event.pid)
 
@@ -132,9 +136,6 @@ def parse_args():
     parser.add_argument(
         "-e", "--event", type=str,
         help="Event to trace")
-    parser.add_argument(
-        "-p", "--postgres_path", type=str,
-        help="Path to the postgres binary")
     return parser.parse_args()
 
 
