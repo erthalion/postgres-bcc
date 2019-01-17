@@ -2,7 +2,17 @@
 #
 # query_wal.py   Summarize WAL writes by postgres backend.
 #                For Linux, uses BCC, eBPF.
-# usage: query_wal $PG_BIN/postgres [-d] [-p PID]
+#                To trace only inside a particular container, you need to
+#                provide a namespace identificator. In case of docker container
+#                to get one you can first check out container Pid:
+#
+#                   docker inspect postgres_test2 --format='{{.State.Pid}}'
+#
+#                Then use lsns to get a namespace id
+#
+#                   lsns -p $PID -t pid
+#
+# usage: query_wal $PG_BIN/postgres [-d] [-p PID] [-n NAMESPACE]
 
 
 from __future__ import print_function
@@ -53,6 +63,7 @@ typedef struct XLogRecord
 struct key_t {
     int cpu;
     int pid;
+    u64 namespace;
     int len;
     char query[QUERY_LEN];
 };
@@ -66,8 +77,12 @@ BPF_HASH(wal_records, struct key_t);
 BPF_HASH(queries, u32, struct backend, HASH_SIZE);
 
 static inline __attribute__((always_inline)) int get_key(struct key_t* key) {
+    struct task_struct *t = (struct task_struct *) bpf_get_current_task();
+
     key->cpu = bpf_get_smp_processor_id();
     key->pid = bpf_get_current_pid_tgid();
+    SAVE_NAMESPACE
+
     struct backend *data = queries.lookup(&(key->pid));
 
     if (data != NULL)
@@ -82,6 +97,8 @@ static inline __attribute__((always_inline)) int get_key(struct key_t* key) {
 int probe_wal_insert_record(struct pt_regs *ctx) {
     struct key_t key = {};
     int result = get_key(&key);
+
+    CHECK_NAMESPACE
 
     if (result == 0)
         return 0;
@@ -143,10 +160,26 @@ def attach(bpf, args):
         pid=pid)
 
 
+def pre_process(text, args):
+    if args.namespace:
+        # starting from 4.18 it's possible to use cgroup_id:
+        # key->cgroup_id = bpf_get_current_cgroup_id();
+
+        text = text.replace("SAVE_NAMESPACE", """
+        key->namespace = t->nsproxy->pid_ns_for_children->ns.inum;
+        """)
+
+        text = text.replace("CHECK_NAMESPACE", """
+        if (key.namespace != {})
+            return 0;
+        """.format(args.namespace))
+    return text
+
+
 def run(args):
     print("Attaching...")
     debug = 4 if args.debug else 0
-    bpf = BPF(text=bpf_text, debug=debug)
+    bpf = BPF(text=pre_process(bpf_text, args), debug=debug)
     attach(bpf, args)
     exiting = False
 
@@ -172,7 +205,7 @@ def run(args):
 
     for (k, v) in bpf.get_table('wal_records').items():
         query = k.query.decode("ascii", "ignore")
-        print("[{}] {}: {}".format(k.pid, query, v.value))
+        print("[{}:{}] {}: {}".format(k.pid, k.namespace, query, v.value))
 
 
 def parse_args():
@@ -182,6 +215,8 @@ def parse_args():
     parser.add_argument("path", type=str, help="path to PostgreSQL binary")
     parser.add_argument("-p", "--pid", type=int, default=-1,
             help="trace this PID only")
+    parser.add_argument("-n", "--namespace", type=int, default=-1,
+            help="trace this namespace only")
     parser.add_argument("-d", "--debug", action='store_true', default=False,
             help="debug mode")
 
