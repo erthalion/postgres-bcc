@@ -1,8 +1,16 @@
 #!/usr/bin/env python
 #
-# write     Track how much data was written by backend type
+# writes_per_type   How much data was written by backend type. For that we
+#                   track vfs_write and analyze user space stacktrace that we've
+#                   got, to see which type of write is that. Since we rely on
+#                   stacktraces, it's possible that some number of writes
+#                   will not have a proper user space stacktrace and will
+#                   not be recognized (unknown type). Due to this it probably
+#                   can't be used to properly measure amount of write IO, but
+#                   incredibly useful for investigation purposes, when one
+#                   doesn't know all writes that are coming from PostgreSQL.
 #
-# usage: write -p PGPATH -e event_name
+# usage: writes_per_type [-d]
 
 
 from __future__ import print_function

@@ -1,9 +1,8 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
-# net.py        Summarize network usage per query/backend. For Linux, uses BCC,
-#               eBPF.
+# net_per_query  Summarize network usage per query/backend. For Linux, uses BCC.
 #
-# usage: net.py $PG_BIN/postgres [-d] [-p PID]
+# usage: net_per_query $PG_BIN/postgres [-d] [-p PID]
 
 from __future__ import print_function
 import argparse

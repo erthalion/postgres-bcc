@@ -1,16 +1,16 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
-# query_cache.py Summarize cache references and cache misses by postgres backend.
-#                Cache reference and cache miss are corresponding events defined in
-#                uapi/linux/perf_event.h, it varies to different architecture.
-#                On x86-64, they mean LLC references and LLC misses. Postgres
-#                backend provides a query string. Based on llstat.py from bcc.
-#                For Linux, uses BCC.
+# llcache_per_query     Summarize cache references and cache misses by postgres backend.
+#                       Cache reference and cache miss are corresponding events defined in
+#                       uapi/linux/perf_event.h, it varies to different architecture.
+#                       On x86-64, they mean LLC references and LLC misses. Postgres
+#                       backend provides a query string. Based on llstat.py from bcc.
+#                       For Linux, uses BCC.
 #
 # SEE ALSO: perf top -e cache-misses -e cache-references -a -ns pid,cpu,comm
 #
 # REQUIRES: Linux 4.9+ (BPF_PROG_TYPE_PERF_EVENT support).
-# usage: query_cache $PG_BIN/postgres [-d] [-c] [-p PID]
+# usage: llcache_per_query $PG_BIN/postgres [-d] [-c] [-p PID]
 
 from __future__ import print_function
 import argparse

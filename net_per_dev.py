@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 #
-# netdev        Track how much data was transmitted per netword device
+# net_per_dev   Track how much data was transmitted per netword device
 #
-# usage: netdev [-d]
+# usage: net_per_dev [-d]
 
 
 from __future__ import print_function

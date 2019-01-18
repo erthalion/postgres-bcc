@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 #
-# writeback   Track schedule_io_timeout inflicted by throttling from writeback
+# io_timeouts   Track schedule_io_timeout inflicted by throttling from writeback
 #
-# usage: writeback [-p PID] [-d]
+# usage: io_timeouts [-p PID] [-d]
 
 
 from __future__ import print_function

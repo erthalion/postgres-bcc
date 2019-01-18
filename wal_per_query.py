@@ -1,18 +1,18 @@
 #!/usr/bin/python
 #
-# query_wal.py   Summarize WAL writes by postgres backend.
-#                For Linux, uses BCC, eBPF.
-#                To trace only inside a particular container, you need to
-#                provide a namespace identificator. In case of docker container
-#                to get one you can first check out container Pid:
+# wal_per_query.py  Summarize WAL writes by postgres backend.
+#                   For Linux, uses BCC, eBPF.
+#                   To trace only inside a particular container, you need to
+#                   provide a namespace identificator. In case of docker container
+#                   to get one you can first check out container Pid:
 #
-#                   docker inspect postgres_test2 --format='{{.State.Pid}}'
+#                      docker inspect postgres_test2 --format='{{.State.Pid}}'
 #
-#                Then use lsns to get a namespace id
+#                   Then use lsns to get a namespace id
 #
-#                   lsns -p $PID -t pid
+#                      lsns -p $PID -t pid
 #
-# usage: query_wal $PG_BIN/postgres [-d] [-p PID] [-n NAMESPACE]
+# usage: wal_per_query $PG_BIN/postgres [-d] [-p PID] [-n NAMESPACE]
 
 
 from __future__ import print_function
