@@ -192,7 +192,8 @@ def run(args):
 
     for (k, v) in bpf.get_table('wal_records').items():
         query = k.query.decode("ascii", "ignore")
-        print("[{}:{}] {}: {}".format(k.pid, k.namespace, query, v.value))
+        print("[{}:{}] {}: {}".format(
+            k.pid, k.namespace, query, utils.size(v.value)))
 
 
 def parse_args():

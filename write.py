@@ -23,77 +23,8 @@ import signal
 import sys
 import errno
 
+import utils
 
-traditional = [
-    (1024 ** 5, 'P'),
-    (1024 ** 4, 'T'),
-    (1024 ** 3, 'G'),
-    (1024 ** 2, 'M'),
-    (1024 ** 1, 'K'),
-    (1024 ** 0, 'B'),
-    ]
-
-def size(bytes, system=traditional):
-    """Human-readable file size.
-
-    Using the traditional system, where a factor of 1024 is used::
-
-    >>> size(10)
-    '10B'
-    >>> size(100)
-    '100B'
-    >>> size(1000)
-    '1000B'
-    >>> size(2000)
-    '1K'
-    >>> size(10000)
-    '9K'
-    >>> size(20000)
-    '19K'
-    >>> size(100000)
-    '97K'
-    >>> size(200000)
-    '195K'
-    >>> size(1000000)
-    '976K'
-    >>> size(2000000)
-    '1M'
-
-    Using the SI system, with a factor 1000::
-
-    >>> size(10, system=si)
-    '10B'
-    >>> size(100, system=si)
-    '100B'
-    >>> size(1000, system=si)
-    '1K'
-    >>> size(2000, system=si)
-    '2K'
-    >>> size(10000, system=si)
-    '10K'
-    >>> size(20000, system=si)
-    '20K'
-    >>> size(100000, system=si)
-    '100K'
-    >>> size(200000, system=si)
-    '200K'
-    >>> size(1000000, system=si)
-    '1M'
-    >>> size(2000000, system=si)
-    '2M'
-
-    """
-    for factor, suffix in system:
-        if bytes >= factor:
-            break
-    amount = int(bytes/factor)
-    if isinstance(suffix, tuple):
-        singular, multiple = suffix
-        if amount == 1:
-            suffix = singular
-        else:
-            suffix = multiple
-    return str(amount) + suffix
 
 text = """
 #include <linux/ptrace.h>
@@ -263,11 +194,11 @@ def run(args):
         if args.debug
             print("[{}:{}:{}] {}: {}".format(
                 k.name, k.pid, k.user_stack_id,
-                event_category(bpf, k.user_stack_id, k.tgid), size(v.value)))
+                event_category(bpf, k.user_stack_id, k.tgid), utils.size(v.value)))
             print_stack(bpf, k.user_stack_id, k.tgid)
 
     for category, written in data.items():
-        print("{}: {}".format(category, size(written)))
+        print("{}: {}".format(category, utils.size(written)))
 
 
 def parse_args():
