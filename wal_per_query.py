@@ -2,11 +2,12 @@
 #
 # wal_per_query.py  Summarize WAL writes by postgres backend.
 #                   For Linux, uses BCC, eBPF.
-#                   To trace only inside a particular container, you need to
+#                   To trace only inside a particular container, you can use
+#                   --container option (that will assume docker), you need to
 #                   provide a namespace identificator. In case of docker container
 #                   to get one you can first check out container Pid:
 #
-#                      docker inspect postgres_test2 --format='{{.State.Pid}}'
+#                      docker inspect postgres_test --format='{{.State.Pid}}'
 #
 #                   Then use lsns to get a namespace id
 #
@@ -20,6 +21,11 @@ import argparse
 from bcc import BPF, PerfType, PerfHWConfig
 import signal
 from time import sleep
+import os
+
+
+DOCKER_PID_CMD = "docker inspect {} --format='{{{{.State.Pid}}}}'"
+NSS_CMD = "lsns -p {} -t pid | tail -n 1 | awk '{{print $1}}'"
 
 
 # load BPF program
@@ -161,18 +167,28 @@ def attach(bpf, args):
 
 
 def pre_process(text, args):
-    if args.namespace:
-        # starting from 4.18 it's possible to use cgroup_id:
-        # key->cgroup_id = bpf_get_current_cgroup_id();
+    nss = None
 
-        text = text.replace("SAVE_NAMESPACE", """
-        key->namespace = t->nsproxy->pid_ns_for_children->ns.inum;
-        """)
+    if args.container:
+        pid_response = os.popen(DOCKER_PID_CMD.format(args.container))
+        pid = int(pid_response.read().strip())
+        nss_response = os.popen(NSS_CMD.format(pid))
+        nss = int(nss_response.read().strip())
 
-        text = text.replace("CHECK_NAMESPACE", """
-        if (key.namespace != {})
-            return 0;
-        """.format(args.namespace))
+    if args.namespace and not nss:
+        nss = args.namespace
+
+    # starting from 4.18 it's possible to use cgroup_id:
+    # key->cgroup_id = bpf_get_current_cgroup_id();
+
+    text = text.replace("SAVE_NAMESPACE", """
+    key->namespace = t->nsproxy->pid_ns_for_children->ns.inum;
+    """)
+
+    text = text.replace("CHECK_NAMESPACE", """
+    if (key.namespace != {})
+        return 0;
+    """.format(nss))
     return text
 
 
@@ -215,6 +231,8 @@ def parse_args():
     parser.add_argument("path", type=str, help="path to PostgreSQL binary")
     parser.add_argument("-p", "--pid", type=int, default=-1,
             help="trace this PID only")
+    parser.add_argument("-c", "--container", type=str,
+            help="trace this container only")
     parser.add_argument("-n", "--namespace", type=int, default=-1,
             help="trace this namespace only")
     parser.add_argument("-d", "--debug", action='store_true', default=False,
