@@ -14,6 +14,8 @@ from bcc import BPF, PerfType, PerfHWConfig
 import signal
 from time import sleep
 
+import utils
+
 
 traditional = [
     (1024 ** 5, 'P'),
@@ -99,6 +101,7 @@ bpf_text="""
 struct key_t {
     int cpu;
     u32 pid;
+    u64 namespace;
     int user_stack_id;
     char name[TASK_COMM_LEN];
 };
@@ -116,6 +119,11 @@ int syscall__pwrite(struct bpf_perf_event_data *ctx) {
     struct key_t key = {};
     key.pid = bpf_get_current_pid_tgid();
     key.user_stack_id = stack_traces.get_stackid(&ctx->regs, BPF_F_USER_STACK);
+
+    SAVE_NAMESPACE
+
+    CHECK_NAMESPACE
+
     bpf_get_current_comm(&(key.name), sizeof(key.name));
     int len = (int) PT_REGS_PARM3(&ctx->regs);
 
@@ -189,15 +197,17 @@ def stack_from_wal(bpf, stack_id, tgid):
     return False
 
 
+def pre_process(text, args):
+    text = utils.replace_namespace(text, args)
+    return text
+
+
 def run(args):
     print("Attaching...")
     debug = 4 if args.debug else 0
-    bpf = BPF(text=bpf_text, debug=debug)
+    bpf = BPF(text=pre_process(bpf_text, args), debug=debug)
     attach(bpf, args)
     exiting = False
-
-    if args.debug:
-        bpf["events"].open_perf_buffer(print_event)
 
     print("Listening...")
     while True:
@@ -218,8 +228,8 @@ def run(args):
 
     for (k, v) in bpf.get_table('query_stacks').items():
         if stack_from_wal(bpf, k.user_stack_id, k.pid):
-            print("PID: {}, NAME: {}, LEN: {}".format(
-                k.pid, k.name, size(v.value)))
+            print("[{}:{}], {}, len: {}".format(
+                k.pid, k.namespace, k.name, size(v.value)))
             print_stack(bpf, k.user_stack_id, k.pid)
 
 
@@ -230,6 +240,10 @@ def parse_args():
     parser.add_argument("path", type=str, help="path to PostgreSQL binary")
     parser.add_argument("-p", "--pid", type=int, default=-1,
             help="trace this PID only")
+    parser.add_argument("-c", "--container", type=str,
+            help="trace this container only")
+    parser.add_argument("-n", "--namespace", type=int,
+            help="trace this namespace only")
     parser.add_argument("-d", "--debug", action='store_true', default=False,
         help="debug mode")
     return parser.parse_args()

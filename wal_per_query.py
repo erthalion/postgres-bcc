@@ -21,11 +21,8 @@ import argparse
 from bcc import BPF, PerfType, PerfHWConfig
 import signal
 from time import sleep
-import os
 
-
-DOCKER_PID_CMD = "docker inspect {} --format='{{{{.State.Pid}}}}'"
-NSS_CMD = "lsns -p {} -t pid | tail -n 1 | awk '{{print $1}}'"
+import utils
 
 
 # load BPF program
@@ -83,12 +80,8 @@ BPF_HASH(wal_records, struct key_t);
 BPF_HASH(queries, u32, struct backend, HASH_SIZE);
 
 static inline __attribute__((always_inline)) int get_key(struct key_t* key) {
-    struct task_struct *t = (struct task_struct *) bpf_get_current_task();
-
     key->cpu = bpf_get_smp_processor_id();
     key->pid = bpf_get_current_pid_tgid();
-    SAVE_NAMESPACE
-
     struct backend *data = queries.lookup(&(key->pid));
 
     if (data != NULL)
@@ -103,6 +96,8 @@ static inline __attribute__((always_inline)) int get_key(struct key_t* key) {
 int probe_wal_insert_record(struct pt_regs *ctx) {
     struct key_t key = {};
     int result = get_key(&key);
+
+    SAVE_NAMESPACE
 
     CHECK_NAMESPACE
 
@@ -167,28 +162,7 @@ def attach(bpf, args):
 
 
 def pre_process(text, args):
-    nss = None
-
-    if args.container:
-        pid_response = os.popen(DOCKER_PID_CMD.format(args.container))
-        pid = int(pid_response.read().strip())
-        nss_response = os.popen(NSS_CMD.format(pid))
-        nss = int(nss_response.read().strip())
-
-    if args.namespace and not nss:
-        nss = args.namespace
-
-    # starting from 4.18 it's possible to use cgroup_id:
-    # key->cgroup_id = bpf_get_current_cgroup_id();
-
-    text = text.replace("SAVE_NAMESPACE", """
-    key->namespace = t->nsproxy->pid_ns_for_children->ns.inum;
-    """)
-
-    text = text.replace("CHECK_NAMESPACE", """
-    if (key.namespace != {})
-        return 0;
-    """.format(nss))
+    text = utils.replace_namespace(text, args)
     return text
 
 
@@ -198,9 +172,6 @@ def run(args):
     bpf = BPF(text=pre_process(bpf_text, args), debug=debug)
     attach(bpf, args)
     exiting = False
-
-    if args.debug:
-        bpf["events"].open_perf_buffer(print_event)
 
     print("Listening...")
     while True:
@@ -233,7 +204,7 @@ def parse_args():
             help="trace this PID only")
     parser.add_argument("-c", "--container", type=str,
             help="trace this container only")
-    parser.add_argument("-n", "--namespace", type=int, default=-1,
+    parser.add_argument("-n", "--namespace", type=int,
             help="trace this namespace only")
     parser.add_argument("-d", "--debug", action='store_true', default=False,
             help="debug mode")
