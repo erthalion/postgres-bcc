@@ -29,6 +29,7 @@ bpf_text="""
 
 struct key_t {
     int pid;
+    u64 namespace;
     char name[TASK_COMM_LEN];
     char query[QUERY_LEN];
 };
@@ -56,6 +57,10 @@ int on_recv(struct pt_regs *ctx) {
     struct key_t key = {};
     get_key(&key);
 
+    SAVE_NAMESPACE
+
+    CHECK_NAMESPACE
+
     u64 zero = 0, *val;
     val = recv.lookup_or_init(&key, &zero);
     (*val) += PT_REGS_PARM3(ctx);
@@ -66,6 +71,10 @@ int on_recv(struct pt_regs *ctx) {
 int on_send(struct pt_regs *ctx) {
     struct key_t key = {};
     get_key(&key);
+
+    SAVE_NAMESPACE
+
+    CHECK_NAMESPACE
 
     u64 zero = 0, *val;
     val = send.lookup_or_init(&key, &zero);
@@ -100,7 +109,8 @@ def print_result(name, table):
     for (k, v) in table.items():
         if k.name == b"postgres":
             backend = k.query.decode("ascii") or get_pid_cmdline(k.pid)
-            print("{} {}: {}".format(k.pid, backend, utils.size(v.value)))
+            print("[{}:{}] {}: {}".format(
+                k.pid, k.namespace, backend, utils.size(v.value)))
     print()
 
 
@@ -122,10 +132,15 @@ def attach(bpf, args):
     bpf.attach_kprobe(event="sys_recv", fn_name="on_recv")
 
 
+def pre_process(text, args):
+    text = utils.replace_namespace(text, args)
+    return text
+
+
 def run(args):
     print("Attaching...")
     debug = 4 if args.debug else 0
-    bpf = BPF(text=bpf_text, debug=debug)
+    bpf = BPF(text=pre_process(bpf_text, args), debug=debug)
     attach(bpf, args)
     exiting = False
 
@@ -160,6 +175,10 @@ def parse_args():
     parser.add_argument("path", type=str, help="path to PostgreSQL binary")
     parser.add_argument("-p", "--pid", type=int, default=-1,
             help="trace this PID only")
+    parser.add_argument("-c", "--container", type=str,
+            help="trace this container only")
+    parser.add_argument("-n", "--namespace", type=int,
+            help="trace this namespace only")
     parser.add_argument("-d", "--debug", action='store_true', default=False,
         help="debug mode")
 
