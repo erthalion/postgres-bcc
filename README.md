@@ -42,3 +42,58 @@ writeback throttling by Linux kernel.
 
 To run these script you need to have bcc installed and relatively new Linux
 kernel.
+
+# Why
+
+* Using bcc allows us to extract quite low-level information about PostgreSQL
+  and how does it interact with Linux Kernel. Usually this kind of metrics are
+  not tracked, but they could significantly help with reasoning about
+  performance.
+
+* postgres-bcc allows collecting metrics per cgroup/K8S pod, which is crucial
+  for performance investigation, but most of tools for resource monitoring
+  doesn't provide this information.
+
+# Examples
+
+```
+# Run PostgreSQL inside a docker container, check network usage under pgbench
+# insert workload. Get postgres binary and container id using docker inspect
+# postgres_test.
+
+$ net_per_query.py $PGBIN -c $CONTAINER_ID
+Attaching...
+Listening...
+Detaching...
+
+Send
+[16397:4026532567] copy pgbench_accounts from stdin: 16B
+[16397:4026532567] alter table pgbench_accounts add primary key (aid): 96B
+[16428:4026532567] postgres: backend 16428: 2K
+[16397:4026532567] vacuum analyze pgbench_tellers: 128B
+[16397:4026532567] postgres: backend 16397: 14K
+[16397:4026532567] vacuum analyze pgbench_history: 128B
+[16397:4026532567] vacuum analyze pgbench_accounts: 128B
+[14921:4026532567] postgres: background writer   : 528B
+[16397:4026532567] vacuum analyze pgbench_branches: 160B
+
+Receive
+[16397:4026532567] copy pgbench_accounts from stdin: 16M
+[16397:4026532567] postgres: backend 16397: 2M
+[14924:4026532567] postgres: stats collector   : 67K
+```
+
+```
+# Run PostgreSQL inside a docker container, check how much WAL was written
+# under pgbench read-write workload.
+
+$ wal_per_query.py $PGBIN -c $CONTAINER_ID
+Attaching...
+Listening...
+Detaching...
+
+[6170:4026532567] INSERT INTO pgbench_history (tid, bid, aid, delta, mtime) VALUES (50, 3, 592413, -1689, CURRENT_TIME: 79B
+[6170:4026532567] UPDATE pgbench_accounts SET abalance = abalance + 2519 WHERE aid = 995333;: 289B
+[6170:4026532567] INSERT INTO pgbench_history (tid, bid, aid, delta, mtime) VALUES (86, 10, 117836, -1792, CURRENT_TIM: 79B
+[6170:4026532567] INSERT INTO pgbench_history (tid, bid, aid, delta, mtime) VALUES (3, 3, 32554, 434, CURRENT_TIMESTAM: 79B
+```
