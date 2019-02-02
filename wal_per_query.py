@@ -166,6 +166,15 @@ def pre_process(text, args):
     return text
 
 
+def output(bpf, fmt="plain"):
+    if fmt == "plain":
+        print()
+        for (k, v) in bpf.get_table('wal_records').items():
+            query = k.query.decode("ascii", "ignore")
+            print("[{}:{}] {}: {}".format(
+                k.pid, k.namespace, query, utils.size(v.value)))
+
+
 def run(args):
     print("Attaching...")
     debug = 4 if args.debug else 0
@@ -176,7 +185,10 @@ def run(args):
     print("Listening...")
     while True:
         try:
-            sleep(1)
+            sleep(args.interval)
+            output(bpf)
+            bpf.get_table('wal_records').clear()
+
             if args.debug:
                 bpf.perf_buffer_poll()
         except KeyboardInterrupt:
@@ -190,10 +202,7 @@ def run(args):
             print()
             break
 
-    for (k, v) in bpf.get_table('wal_records').items():
-        query = k.query.decode("ascii", "ignore")
-        print("[{}:{}] {}: {}".format(
-            k.pid, k.namespace, query, utils.size(v.value)))
+    output(bpf)
 
 
 def parse_args():
@@ -207,6 +216,8 @@ def parse_args():
             help="trace this container only")
     parser.add_argument("-n", "--namespace", type=int,
             help="trace this namespace only")
+    parser.add_argument("-i", "--interval", type=int, default=5,
+            help="after how many seconds output the result")
     parser.add_argument("-d", "--debug", action='store_true', default=False,
             help="debug mode")
 

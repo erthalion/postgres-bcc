@@ -191,7 +191,7 @@ def run(args):
         category = "{},{}".format(process, action)
         data[category] = data.get(category, 0) + v.value
 
-        if args.debug
+        if args.debug:
             print("[{}:{}:{}] {}: {}".format(
                 k.name, k.pid, k.user_stack_id,
                 event_category(bpf, k.user_stack_id, k.tgid), utils.size(v.value)))
