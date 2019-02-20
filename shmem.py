@@ -202,16 +202,25 @@ def run(args):
     print("mmap:")
     for (k, v) in bpf.get_table('mmap_size').items():
         size = utils.size(v.value)
-        print("[{}] {}: {}".format(k.pid, k.name.decode("ascii"), size))
+        name = k.name.decode("ascii")
+        if not name.startswith("postgres"):
+            return
+        print("[{}]: {}".format(k.pid, size))
 
     print("anon shm:")
     for (k, v) in bpf.get_table('anon_shm_size').items():
         size = utils.size(v.value)
-        print("[{}] {}: {}".format(k.pid, k.name.decode("ascii"), size))
+        name = k.name.decode("ascii")
+        if not name.startswith("postgres"):
+            return
+        print("[{}]: {}".format(k.pid, size))
 
     print("shm:")
     for (k, v) in bpf.get_table('shm_size').items():
         size = utils.size(v.value)
+        name = k.name.decode("ascii")
+        if not name.startswith("postgres"):
+            return
         print("[{}]: {}".format(k.file.decode("ascii"), size))
 
 
