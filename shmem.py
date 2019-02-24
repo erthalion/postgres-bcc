@@ -1,5 +1,10 @@
 #!/usr/bin/env python
 #
+# shmem     Track shared memory allocation by postgres.
+#
+# usage: shmem $PG_BIN/postgres [-d] [-c CONTAINER_ID] [-n NAMESPACE]
+#                               [-i INTERVAL]
+
 
 from __future__ import print_function
 from time import sleep
@@ -21,13 +26,14 @@ text = """
 
 struct key_t {
     int pid;
-    size_t size;
-    int flags;
+    STRUCT_SIZE
+    STRUCT_FLAGS
+    u64 namespace;
     char name[TASK_COMM_LEN];
 };
 
 struct truncate_key_t {
-    int fd;
+    u64 namespace;
     char file[100];
     char name[TASK_COMM_LEN];
 };
@@ -37,44 +43,36 @@ BPF_HASH(mmap_size, struct key_t, long);
 BPF_HASH(anon_shm_size, struct key_t, long);
 BPF_HASH(shm_size, struct truncate_key_t, long);
 
-static inline __attribute__((always_inline)) void get_key(struct key_t* key) {
+static inline __attribute__((always_inline))
+void get_key(struct key_t* key)
+{
     key->pid = bpf_get_current_pid_tgid();
     bpf_get_current_comm(&(key->name), sizeof(key->name));
 }
 
-static inline __attribute__((always_inline)) void get_truncate_key(struct truncate_key_t* key) {
+static inline __attribute__((always_inline))
+void get_truncate_key(struct truncate_key_t* key)
+{
     bpf_get_current_comm(&(key->name), sizeof(key->name));
 }
 
-int probe_pg_shared_memory_create(struct pt_regs *ctx, size_t size, bool makePrivate, int port, void **shim)
+int probe_pg_shared_memory_create(struct pt_regs *ctx, size_t size,
+                                  bool makePrivate, int port, void **shim)
 {
     struct key_t key = {};
 
     get_key(&key);
 
-    unsigned long zero = 0, *val;
-    val = mmap_size.lookup_or_init(&key, &zero);
-    (*val) += size;
+    SAVE_NAMESPACE
 
-    key.size = size;
-    events.perf_submit(ctx, &key, sizeof(key));
-
-    return 0;
-}
-
-int syscall__mmap(struct pt_regs *ctx, u64 addr, size_t size, int prot, int flags, int fd, off_t offset)
-{
-    struct key_t key = {};
-
-    get_key(&key);
+    CHECK_NAMESPACE
 
     unsigned long zero = 0, *val;
     val = mmap_size.lookup_or_init(&key, &zero);
     (*val) += size;
 
-    key.size = size;
-    key.flags = flags;
-    events.perf_submit(ctx, &key, sizeof(key));
+    STORE_SIZE
+    SUBMIT_EVENT
 
     return 0;
 }
@@ -88,30 +86,37 @@ int syscall__shm(struct pt_regs *ctx, u64 sys_key, size_t size, int flags)
 
     get_key(&key);
 
+    SAVE_NAMESPACE
+
+    CHECK_NAMESPACE
+
     unsigned long zero = 0, *val;
     val = anon_shm_size.lookup_or_init(&key, &zero);
     (*val) += size;
 
-    key.size = size;
-    key.flags = flags;
-    events.perf_submit(ctx, &key, sizeof(key));
+    STORE_SIZE
+    STORE_FLAGS
+    SUBMIT_EVENT
 
     return 0;
 }
 
-int probe_do_truncate(struct pt_regs *ctx, struct dentry *dentry, int size, unsigned int time_attrs, struct file *filep)
+int probe_do_truncate(struct pt_regs *ctx, struct dentry *dentry, int size,
+                      unsigned int time_attrs, struct file *filep)
 {
     struct truncate_key_t key = {};
 
     get_truncate_key(&key);
+
+    SAVE_NAMESPACE
+
+    CHECK_NAMESPACE
+
     bpf_probe_read(&key.file, sizeof(key.file), (void *)dentry->d_name.name);
 
     unsigned long zero = 0, *val;
     val = shm_size.lookup_or_init(&key, &zero);
     (*val) = size;
-
-    // key.fd = fd;
-    // events.perf_submit(ctx, &key, sizeof(key));
 
     return 0;
 }
@@ -122,21 +127,11 @@ def attach(bpf, args):
     binary_path = args.path
     pid = args.pid
 
-    # bpf.attach_uprobe(
-        # name=binary_path,
-        # sym="dsm_create",
-        # fn_name="probe_dsm_create",
-        # pid=pid)
     bpf.attach_uprobe(
         name=binary_path,
         sym="PGSharedMemoryCreate",
         fn_name="probe_pg_shared_memory_create",
         pid=pid)
-
-    # bpf.attach_kprobe(
-        # event=bpf.get_syscall_fnname("mmap"),
-        # fn_name="syscall__mmap"
-    # )
 
     bpf.attach_kprobe(
         event=bpf.get_syscall_fnname("shmget"),
@@ -154,21 +149,71 @@ def signal_ignore(signal, frame):
     print()
 
 
-# class Data(ct.Structure):
-    # _fields_ = [("pid", ct.c_int), ("name", ct.c_char * 16)]
-
-
-class DataDebug(ct.Structure):
+class Data(ct.Structure):
     _fields_ = [("pid", ct.c_int),
                 ("size", ct.c_ulong),
                 ("flags", ct.c_int),
+                ("namespace", ct.c_ulonglong),
                 ("name", ct.c_char * 16)]
+
+
+def pre_process(text, args):
+    text = utils.replace_namespace(text, args)
+    if args.debug:
+        text = text.replace("STRUCT_SIZE", "size_t size;")
+        text = text.replace("STRUCT_FLAGS", "int flags;")
+        text = text.replace("STORE_SIZE", "key.size = size;")
+        text = text.replace("STORE_FLAGS", "key.flags = flags;")
+        text = text.replace(
+            "SUBMIT_EVENT",
+            "events.perf_submit(ctx, &key, sizeof(key));"
+        )
+    else:
+        text = text.replace("STRUCT_SIZE", "")
+        text = text.replace("STRUCT_FLAGS", "")
+        text = text.replace("STORE_SIZE", "")
+        text = text.replace("STORE_FLAGS", "")
+        text = text.replace("SUBMIT_EVENT", "")
+
+    return text
+
+
+def output(bpf, fmt="plain"):
+    if fmt == "plain":
+        print()
+        print("mmap:")
+        for (k, v) in bpf.get_table('mmap_size').items():
+            size = utils.size(v.value)
+            name = k.name.decode("ascii")
+            if not name.startswith("postgres"):
+                return
+            print("[{}]: {}".format(k.pid, size))
+
+        print("anon shm:")
+        for (k, v) in bpf.get_table('anon_shm_size').items():
+            size = utils.size(v.value)
+            name = k.name.decode("ascii")
+            if not name.startswith("postgres"):
+                return
+            print("[{}]: {}".format(k.pid, size))
+
+        print("shm:")
+        for (k, v) in bpf.get_table('shm_size').items():
+            size = utils.size(v.value)
+            name = k.name.decode("ascii")
+            if not name.startswith("postgres"):
+                return
+            print("[{}]: {}".format(k.file.decode("ascii"), size))
+
+    bpf.get_table('mmap_size').clear()
+    bpf.get_table('shm_size').clear()
+    bpf.get_table('anon_shm_size').clear()
 
 
 def run(args):
     print("Attaching...")
     debug = 4 if args.debug else 0
-    bpf = BPF(text=text, debug=debug)
+    bpf = BPF(text=pre_process(text, args), debug=debug)
     attach(bpf, args)
     exiting = False
 
@@ -186,7 +231,9 @@ def run(args):
     print("Listening...")
     while True:
         try:
-            sleep(1)
+            sleep(args.interval)
+            output(bpf)
+
             if args.debug:
                 bpf.perf_buffer_poll()
         except KeyboardInterrupt:
@@ -198,30 +245,7 @@ def run(args):
             print("Detaching...")
             break
 
-    print()
-    print("mmap:")
-    for (k, v) in bpf.get_table('mmap_size').items():
-        size = utils.size(v.value)
-        name = k.name.decode("ascii")
-        if not name.startswith("postgres"):
-            return
-        print("[{}]: {}".format(k.pid, size))
-
-    print("anon shm:")
-    for (k, v) in bpf.get_table('anon_shm_size').items():
-        size = utils.size(v.value)
-        name = k.name.decode("ascii")
-        if not name.startswith("postgres"):
-            return
-        print("[{}]: {}".format(k.pid, size))
-
-    print("shm:")
-    for (k, v) in bpf.get_table('shm_size').items():
-        size = utils.size(v.value)
-        name = k.name.decode("ascii")
-        if not name.startswith("postgres"):
-            return
-        print("[{}]: {}".format(k.file.decode("ascii"), size))
+    output(bpf)
 
 
 def parse_args():
@@ -231,6 +255,12 @@ def parse_args():
     parser.add_argument("path", type=str, help="path to target binary")
     parser.add_argument("-p", "--pid", type=int, default=-1,
             help="trace this PID only")
+    parser.add_argument("-c", "--container", type=str,
+            help="trace this container only")
+    parser.add_argument("-n", "--namespace", type=int,
+            help="trace this namespace only")
+    parser.add_argument("-i", "--interval", type=int, default=5,
+            help="after how many seconds output the result")
     parser.add_argument("-d", "--debug", action='store_true', default=False,
             help="debug mode")
     return parser.parse_args()

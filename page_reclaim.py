@@ -3,7 +3,7 @@
 # page_reclaim  Track memory page reclaim by postgres processes,
 #               globally or per cgroup/namespace
 #
-# usage: page_reclaim [-d] [-c CONTAINER_ID] [-n NAMESPACE]
+# usage: page_reclaim [-d] [-c CONTAINER_ID] [-n NAMESPACE] [-i INTERVAL]
 
 
 from __future__ import print_function

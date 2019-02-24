@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 #
-# lwlocks    Track LWLocks in PostgreSQL and print wait/hold time
+# latency    Track LWLocks in PostgreSQL and print wait/hold time
 #            as a histogram. For Linux, uses BCC, eBPF.
 #
-# usage: lwlocks $PG_BIN/postgres [-p PID] [-d]
+# usage: latency $PG_BIN/postgres [-d] [-p PID] [-i INTERVAL]
+#                                 [-c CONTAINER_ID] [-n NAMESPACE]
 
 from __future__ import print_function
 from time import sleep
