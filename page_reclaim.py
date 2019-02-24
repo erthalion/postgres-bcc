@@ -8,12 +8,12 @@
 
 from __future__ import print_function
 from time import sleep
-from bcc import BPF, USDT
 
 import argparse
 import ctypes as ct
 import signal
-import sys
+
+from bcc import BPF
 
 import utils
 
@@ -62,24 +62,27 @@ int probe_try_to_free_mem_cgroup_pages(struct pt_regs *ctx)
 PAGE_SIZE = 4 * 1024
 
 
-def pre_process(text, args):
-    text = utils.replace_namespace(text, args)
+def pre_process(bpf_text, args):
+    bpf_text = utils.replace_namespace(bpf_text, args)
     if args.debug:
-        text = text.replace("STRUCT_NR_PAGES", "unsigned long nr_pages;")
-        text = text.replace(
+        bpf_text = bpf_text.replace(
+            "STRUCT_NR_PAGES",
+            "unsigned long nr_pages;"
+        )
+        bpf_text = bpf_text.replace(
             "STORE_NR_PAGES",
             "key.nr_pages = (unsigned long) PT_REGS_RC(ctx);"
         )
-        text = text.replace(
+        bpf_text = bpf_text.replace(
             "SUBMIT_EVENT",
             "events.perf_submit(ctx, &key, sizeof(key));"
         )
     else:
-        text = text.replace("STRUCT_NR_PAGES", "")
-        text = text.replace("STORE_NR_PAGES", "")
-        text = text.replace("SUBMIT_EVENT", "")
+        bpf_text = bpf_text.replace("STRUCT_NR_PAGES", "")
+        bpf_text = bpf_text.replace("STORE_NR_PAGES", "")
+        bpf_text = bpf_text.replace("SUBMIT_EVENT", "")
 
-    return text
+    return bpf_text
 
 
 def attach(bpf, args):
@@ -90,7 +93,7 @@ def attach(bpf, args):
 
 
 # signal handler
-def signal_ignore(signal, frame):
+def signal_ignore(sig, frame):
     print()
 
 
@@ -159,14 +162,18 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Track memory page reclaim by postgres processes",
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("-c", "--container", type=str,
-            help="trace this container only")
-    parser.add_argument("-n", "--namespace", type=int,
-            help="trace this namespace only")
-    parser.add_argument("-i", "--interval", type=int, default=5,
-            help="after how many seconds output the result")
-    parser.add_argument("-d", "--debug", action='store_true', default=False,
-            help="debug mode")
+    parser.add_argument(
+        "-c", "--container", type=str,
+        help="trace this container only")
+    parser.add_argument(
+        "-n", "--namespace", type=int,
+        help="trace this namespace only")
+    parser.add_argument(
+        "-i", "--interval", type=int, default=5,
+        help="after how many seconds output the result")
+    parser.add_argument(
+        "-d", "--debug", action='store_true', default=False,
+        help="debug mode")
 
     return parser.parse_args()
 

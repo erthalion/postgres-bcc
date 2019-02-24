@@ -1,18 +1,18 @@
 #!/usr/bin/env python
 #
-# io_timeouts   Track schedule_io_timeout inflicted by throttling from writeback.
+# io_timeouts   Track schedule_io_timeout inflicted by throttling from
+#               writeback.
 #
 # usage: io_timeouts [-p PID] [-d]
 
 
 from __future__ import print_function
 from time import sleep
-from bcc import BPF, USDT
+from bcc import BPF
 
 import argparse
 import ctypes as ct
 import signal
-import sys
 
 
 text = """
@@ -107,7 +107,7 @@ def attach(bpf, args):
 
 
 # signal handler
-def signal_ignore(signal, frame):
+def signal_ignore(sig, frame):
     print()
 
 
@@ -120,7 +120,8 @@ class Data(ct.Structure):
 
 def print_event(cpu, data, size):
     event = ct.cast(data, ct.POINTER(Data)).contents
-    print("Event: pid {} query {} timeout {}".format(event.pid, event.query, event.timeout))
+    print("Event: pid {} query {} timeout {}".format(
+        event.pid, event.query, event.timeout))
 
 
 def run(args):
@@ -148,6 +149,7 @@ def run(args):
 
     for (k, v) in bpf.get_table('io_timeout').items():
         print("[{}] {}: {}".format(k.pid, k.query, v.value))
+
 
 def parse_args():
     parser = argparse.ArgumentParser(

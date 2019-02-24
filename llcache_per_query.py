@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 #
-# llcache_per_query     Summarize cache references and cache misses by postgres backend.
-#                       Cache reference and cache miss are corresponding events defined in
-#                       uapi/linux/perf_event.h, it varies to different architecture.
-#                       On x86-64, they mean LLC references and LLC misses. Postgres
-#                       backend provides a query string. Based on llstat.py from bcc.
+# llcache_per_query     Summarize cache references and cache misses by
+#                       postgres backend. Cache reference and cache miss are
+#                       events defined in uapi/linux/perf_event.h, it varies
+#                       to different architecture. On x86-64, they mean LLC
+#                       references and LLC misses. Postgres backend provides
+#                       a query string. Based on llstat.py from bcc.
 #                       For Linux, uses BCC.
 #
 # SEE ALSO: perf top -e cache-misses -e cache-references -a -ns pid,cpu,comm
@@ -14,13 +15,15 @@
 
 from __future__ import print_function
 import argparse
-from bcc import BPF, PerfType, PerfHWConfig
+
 import signal
 from time import sleep
 
+from bcc import BPF, PerfType, PerfHWConfig
+
 
 # load BPF program
-bpf_text="""
+bpf_text = """
 #include <linux/ptrace.h>
 #include <uapi/linux/bpf_perf_event.h>
 
@@ -104,7 +107,7 @@ void probe_exec_simple_query_finish(struct pt_regs *ctx)
 
 
 # signal handler
-def signal_ignore(signal, frame):
+def signal_ignore(sig, frame):
     print()
 
 
@@ -137,15 +140,10 @@ def run(args):
     attach(bpf, args)
     exiting = False
 
-    if args.debug:
-        bpf["events"].open_perf_buffer(print_event)
-
     print("Listening...")
     while True:
         try:
             sleep(1)
-            if args.debug:
-                bpf.perf_buffer_poll()
         except KeyboardInterrupt:
             exiting = True
             # as cleanup can take many seconds, trap Ctrl-C:
@@ -174,28 +172,31 @@ def run(args):
         tot_miss += miss
         # This happens on some PIDs due to missed counts caused by sampling
         hit = (v.value - miss) if (v.value >= miss) else 0
-        print('{:<8d} {:<16s} {:<100s} {:<4d} {:>12d} {:>12d} {:>6.2f}%'.format(
-            k.pid, k.name.decode(), k.query.decode(), k.cpu, v.value, miss,
-            (float(hit) / float(v.value)) * 100.0))
+        msg = '{:<8d} {:<16s} {:<100s} {:<4d} {:>12d} {:>12d} {:>6.2f}%'
+        print(msg.format(k.pid, k.name.decode(), k.query.decode(), k.cpu,
+                         v.value, miss, (float(hit) / float(v.value)) * 100.0))
 
     if tot_ref != 0:
         print()
-        print('Total References: {} Total Misses: {} Hit Rate: {:.2f}%'.format(
-            tot_ref, tot_miss, (float(tot_ref - tot_miss) / float(tot_ref)) * 100.0))
+        msg = 'Total References: {} Total Misses: {} Hit Rate: {:.2f}%'
+        print(msg.format(tot_ref, tot_miss,
+                         (float(tot_ref - tot_miss) / float(tot_ref)) * 100.0))
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Summarize cache references and misses by postgres backend",
+        description="Summarize cache references & misses by postgres backend",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("path", type=str, help="path to PostgreSQL binary")
     parser.add_argument(
         "-c", "--sample_period", type=int, default=100,
         help="Sample one in this many number of cache reference / miss events")
-    parser.add_argument("-p", "--pid", type=int, default=-1,
-            help="trace this PID only")
-    parser.add_argument("-d", "--debug", action='store_true', default=False,
-            help="debug mode")
+    parser.add_argument(
+        "-p", "--pid", type=int, default=-1,
+        help="trace this PID only")
+    parser.add_argument(
+        "-d", "--debug", action='store_true', default=False,
+        help="debug mode")
 
     return parser.parse_args()
 

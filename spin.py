@@ -7,12 +7,12 @@
 
 from __future__ import print_function
 from time import sleep
-from bcc import BPF
 
 import argparse
 import ctypes as ct
 import signal
-import sys
+
+from bcc import BPF
 
 
 text = """
@@ -38,7 +38,8 @@ BPF_HASH(lock_wait, u32, struct spin_lock);
 // Histogram of lock wait times
 BPF_HISTOGRAM(lock_wait_hist, u64);
 
-void probe_spin_lock_wait_start(struct pt_regs *ctx, volatile slock_t *lock, const char *file, int line, const char *func)
+void probe_spin_lock_wait_start(struct pt_regs *ctx, volatile slock_t *lock,
+                                const char *file, int line, const char *func)
 {
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid();
@@ -59,7 +60,8 @@ void probe_spin_lock_wait_start(struct pt_regs *ctx, volatile slock_t *lock, con
     lock_wait.update(&pid, &data);
 }
 
-void probe_spin_lock_wait_finish(struct pt_regs *ctx, volatile slock_t *lock, const char *file, int line, const char *func)
+void probe_spin_lock_wait_finish(struct pt_regs *ctx, volatile slock_t *lock,
+                                 const char *file, int line, const char *func)
 {
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid();
@@ -95,7 +97,7 @@ def attach(bpf, binary_path, pid=-1):
 
 
 # signal handler
-def signal_ignore(signal, frame):
+def signal_ignore(sig, frame):
     print()
 
 
@@ -155,10 +157,12 @@ def parse_args():
         description="Time spin locks in PostgreSQL",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("path", type=str, help="path to target binary")
-    parser.add_argument("-p", "--pid", type=int, default=-1,
-            help="trace this PID only")
-    parser.add_argument("-d", "--debug", action='store_true', default=False,
-            help="debug mode")
+    parser.add_argument(
+        "-p", "--pid", type=int, default=-1,
+        help="trace this PID only")
+    parser.add_argument(
+        "-d", "--debug", action='store_true', default=False,
+        help="debug mode")
 
     return parser.parse_args()
 

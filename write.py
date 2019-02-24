@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 #
 # writes_per_type   How much data was written by backend type. For that we
-#                   track vfs_write and analyze user space stacktrace that we've
+#                   track vfs_write and analyze user space stacktrace we've
 #                   got, to see which type of write is that. Since we rely on
 #                   stacktraces, it's possible that some number of writes
 #                   will not have a proper user space stacktrace and will
@@ -15,13 +15,13 @@
 
 from __future__ import print_function
 from time import sleep
-from bcc import BPF, USDT
 
 import argparse
 import ctypes as ct
 import signal
-import sys
 import errno
+
+from bcc import BPF
 
 import utils
 
@@ -55,7 +55,8 @@ int probe_vfs_write(struct pt_regs *ctx)
     struct key_t key = {};
     get_key(&key);
 
-    key.user_stack_id = stack_traces.get_stackid(ctx, BPF_F_REUSE_STACKID | BPF_F_USER_STACK);
+    key.user_stack_id = stack_traces.get_stackid(ctx,
+        BPF_F_REUSE_STACKID | BPF_F_USER_STACK);
     key.size = (size_t) PT_REGS_PARM3(ctx);
 
     size_t zero = 0, *val;
@@ -72,7 +73,7 @@ def attach(bpf, args):
 
 
 # signal handler
-def signal_ignore(signal, frame):
+def signal_ignore(sig, frame):
     print()
 
 
@@ -110,7 +111,9 @@ def event_category(bpf, user_stack_id, tgid):
     syms = {bpf.sym(addr, tgid) for addr in stack}
 
     def contains(*symbols):
-        return syms.intersection({s.encode("ascii", "ignore") for s in symbols})
+        return syms.intersection(
+            {s.encode("ascii", "ignore") for s in symbols}
+        )
 
     if contains(
         "XLogFlush",
@@ -149,6 +152,7 @@ def event_category(bpf, user_stack_id, tgid):
 
     return (action, process)
 
+
 def run(args):
     print("Attaching...")
     debug = 4 if args.debug else 0
@@ -162,9 +166,10 @@ def run(args):
         if not name.startswith("postgres"):
             return
         print("Event: pid {} category {} size {}".format(
-            event.pid, event_category(bpf, event.user_stack_id, event.pid), event.size))
+            event.pid,
+            event_category(bpf, event.user_stack_id, event.pid),
+            event.size))
         print_stack(bpf, event.user_stack_id, event.pid)
-
 
     print("Listening...")
     while True:
@@ -194,7 +199,8 @@ def run(args):
         if args.debug:
             print("[{}:{}:{}] {}: {}".format(
                 k.name, k.pid, k.user_stack_id,
-                event_category(bpf, k.user_stack_id, k.tgid), utils.size(v.value)))
+                event_category(bpf, k.user_stack_id, k.tgid),
+                utils.size(v.value)))
             print_stack(bpf, k.user_stack_id, k.tgid)
 
     for category, written in data.items():
@@ -205,8 +211,9 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="",
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("-d", "--debug", action='store_true', default=False,
-            help="debug mode")
+    parser.add_argument(
+        "-d", "--debug", action='store_true', default=False,
+        help="debug mode")
     return parser.parse_args()
 
 

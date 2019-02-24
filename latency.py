@@ -8,12 +8,11 @@
 
 from __future__ import print_function
 from time import sleep
-from bcc import BPF
 
 import argparse
-import ctypes as ct
 import signal
-import sys
+
+from bcc import BPF
 
 import utils
 
@@ -69,7 +68,7 @@ void probe_exec_simple_query_finish(struct pt_regs *ctx)
 
 
 # signal handler
-def signal_ignore(signal, frame):
+def signal_ignore(sig, frame):
     print()
 
 
@@ -89,9 +88,9 @@ def attach(bpf, args):
         pid=pid)
 
 
-def pre_process(text, args):
-    text = utils.replace_namespace(text, args)
-    return text
+def pre_process(bpf_text, args):
+    bpf_text = utils.replace_namespace(bpf_text, args)
+    return bpf_text
 
 
 def output(bpf, fmt="plain"):
@@ -134,19 +133,24 @@ def run(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Summarize cache references and misses by postgres backend",
+        description="Summarize cache references & misses by postgres backend",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("path", type=str, help="path to PostgreSQL binary")
-    parser.add_argument("-p", "--pid", type=int, default=-1,
-            help="trace this PID only")
-    parser.add_argument("-c", "--container", type=str,
-            help="trace this container only")
-    parser.add_argument("-n", "--namespace", type=int,
-            help="trace this namespace only")
-    parser.add_argument("-i", "--interval", type=int, default=5,
-            help="after how many seconds output the result")
-    parser.add_argument("-d", "--debug", action='store_true', default=False,
-            help="debug mode")
+    parser.add_argument(
+        "-p", "--pid", type=int, default=-1,
+        help="trace this PID only")
+    parser.add_argument(
+        "-c", "--container", type=str,
+        help="trace this container only")
+    parser.add_argument(
+        "-n", "--namespace", type=int,
+        help="trace this namespace only")
+    parser.add_argument(
+        "-i", "--interval", type=int, default=5,
+        help="after how many seconds output the result")
+    parser.add_argument(
+        "-d", "--debug", action='store_true', default=False,
+        help="debug mode")
 
     return parser.parse_args()
 

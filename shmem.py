@@ -8,12 +8,12 @@
 
 from __future__ import print_function
 from time import sleep
-from bcc import BPF
 
 import argparse
 import ctypes as ct
 import signal
-import sys
+
+from bcc import BPF
 
 import utils
 
@@ -145,7 +145,7 @@ def attach(bpf, args):
 
 
 # signal handler
-def signal_ignore(signal, frame):
+def signal_ignore(sig, frame):
     print()
 
 
@@ -157,25 +157,25 @@ class Data(ct.Structure):
                 ("name", ct.c_char * 16)]
 
 
-def pre_process(text, args):
-    text = utils.replace_namespace(text, args)
+def pre_process(bpf_text, args):
+    bpf_text = utils.replace_namespace(bpf_text, args)
     if args.debug:
-        text = text.replace("STRUCT_SIZE", "size_t size;")
-        text = text.replace("STRUCT_FLAGS", "int flags;")
-        text = text.replace("STORE_SIZE", "key.size = size;")
-        text = text.replace("STORE_FLAGS", "key.flags = flags;")
-        text = text.replace(
+        bpf_text = bpf_text.replace("STRUCT_SIZE", "size_t size;")
+        bpf_text = bpf_text.replace("STRUCT_FLAGS", "int flags;")
+        bpf_text = bpf_text.replace("STORE_SIZE", "key.size = size;")
+        bpf_text = bpf_text.replace("STORE_FLAGS", "key.flags = flags;")
+        bpf_text = bpf_text.replace(
             "SUBMIT_EVENT",
             "events.perf_submit(ctx, &key, sizeof(key));"
         )
     else:
-        text = text.replace("STRUCT_SIZE", "")
-        text = text.replace("STRUCT_FLAGS", "")
-        text = text.replace("STORE_SIZE", "")
-        text = text.replace("STORE_FLAGS", "")
-        text = text.replace("SUBMIT_EVENT", "")
+        bpf_text = bpf_text.replace("STRUCT_SIZE", "")
+        bpf_text = bpf_text.replace("STRUCT_FLAGS", "")
+        bpf_text = bpf_text.replace("STORE_SIZE", "")
+        bpf_text = bpf_text.replace("STORE_FLAGS", "")
+        bpf_text = bpf_text.replace("SUBMIT_EVENT", "")
 
-    return text
+    return bpf_text
 
 
 def output(bpf, fmt="plain"):
@@ -218,7 +218,7 @@ def run(args):
     exiting = False
 
     def print_event(cpu, data, size):
-        event = ct.cast(data, ct.POINTER(DataDebug)).contents
+        event = ct.cast(data, ct.POINTER(Data)).contents
         name = event.name.decode("ascii")
         if not name.startswith("postgres"):
             return
@@ -253,16 +253,21 @@ def parse_args():
         description="",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("path", type=str, help="path to target binary")
-    parser.add_argument("-p", "--pid", type=int, default=-1,
-            help="trace this PID only")
-    parser.add_argument("-c", "--container", type=str,
-            help="trace this container only")
-    parser.add_argument("-n", "--namespace", type=int,
-            help="trace this namespace only")
-    parser.add_argument("-i", "--interval", type=int, default=5,
-            help="after how many seconds output the result")
-    parser.add_argument("-d", "--debug", action='store_true', default=False,
-            help="debug mode")
+    parser.add_argument(
+        "-p", "--pid", type=int, default=-1,
+        help="trace this PID only")
+    parser.add_argument(
+        "-c", "--container", type=str,
+        help="trace this container only")
+    parser.add_argument(
+        "-n", "--namespace", type=int,
+        help="trace this namespace only")
+    parser.add_argument(
+        "-i", "--interval", type=int, default=5,
+        help="after how many seconds output the result")
+    parser.add_argument(
+        "-d", "--debug", action='store_true', default=False,
+        help="debug mode")
     return parser.parse_args()
 
 

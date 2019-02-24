@@ -7,12 +7,12 @@
 
 from __future__ import print_function
 from time import sleep
-from bcc import BPF, USDT
 
 import argparse
 import ctypes as ct
 import signal
-import sys
+
+from bcc import BPF
 
 import utils
 
@@ -53,8 +53,8 @@ struct sk_buff {
                 unsigned long        dev_scratch;
             };
         };
-        struct rb_node        rbnode; /* used in netem, ip4 defrag, and tcp stack */
-        struct list_head    list;
+        struct rb_node   rbnode; /* used in netem, ip4 defrag, and tcp stack */
+        struct list_head list;
     };
 
     union {
@@ -136,7 +136,7 @@ def attach(bpf):
 
 
 # signal handler
-def signal_ignore(signal, frame):
+def signal_ignore(sig, frame):
     print()
 
 
@@ -148,7 +148,8 @@ class Data(ct.Structure):
 
 def print_event(cpu, data, size):
     event = ct.cast(data, ct.POINTER(Data)).contents
-    print("Event: pid {} device {} len {}".format(event.pid, event.device, event.len))
+    print("Event: pid {} device {} len {}".format(
+        event.pid, event.device, event.len))
 
 
 def run(args):
@@ -187,8 +188,9 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Track how much data was transmitted per netword device",
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("-d", "--debug", action='store_true', default=False,
-            help="debug mode")
+    parser.add_argument(
+        "-d", "--debug", action='store_true', default=False,
+        help="debug mode")
 
     return parser.parse_args()
 

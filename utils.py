@@ -20,9 +20,9 @@ def replace_namespace(text, args):
             pid = int(pid_response.read().strip())
             nss_response = os.popen(NSS_CMD.format(pid))
             nss = int(nss_response.read().strip())
-        except ValueError as ex:
-            msg = "Coulnd't get namespace for container {}"
-            logging.exception(msg.format(args.container))
+        except ValueError:
+            msg = "Coulnd't get namespace for container %"
+            logging.exception(msg, args.container)
             nss = None
 
     if args.namespace and not nss:
@@ -51,7 +51,8 @@ traditional = [
     (1024 ** 0, 'B'),
     ]
 
-def size(bytes, system=traditional):
+
+def size(size_in_bytes, system=None):
     """Human-readable file size.
 
     Using the traditional system, where a factor of 1024 is used::
@@ -101,10 +102,12 @@ def size(bytes, system=traditional):
     '2M'
 
     """
+    system = system or traditional
+
     for factor, suffix in system:
-        if bytes >= factor:
+        if size_in_bytes >= factor:
             break
-    amount = int(bytes/factor)
+    amount = int(size_in_bytes/factor)
     if isinstance(suffix, tuple):
         singular, multiple = suffix
         if amount == 1:

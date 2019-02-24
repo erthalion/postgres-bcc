@@ -7,12 +7,12 @@
 
 from __future__ import print_function
 from time import sleep
-from bcc import BPF, USDT
 
 import argparse
 import ctypes as ct
 import signal
-import sys
+
+from bcc import BPF
 
 
 text = """
@@ -54,7 +54,8 @@ int probe_event(struct pt_regs *ctx)
     struct key_t key = {};
     get_key(&key);
 
-    key.user_stack_id = stack_traces.get_stackid(ctx, BPF_F_REUSE_STACKID | BPF_F_USER_STACK);
+    key.user_stack_id = stack_traces.get_stackid(ctx,
+        BPF_F_REUSE_STACKID | BPF_F_USER_STACK);
     key.kernel_stack_id = stack_traces.get_stackid(ctx, BPF_F_REUSE_STACKID);
 
     events.perf_submit(ctx, &key, sizeof(key));
@@ -67,7 +68,7 @@ def attach(event_name, bpf, args):
 
 
 # signal handler
-def signal_ignore(signal, frame):
+def signal_ignore(sig, frame):
     print()
 
 

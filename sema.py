@@ -13,7 +13,6 @@ from bcc import BPF
 import argparse
 import ctypes as ct
 import signal
-import sys
 
 
 text = """
@@ -204,10 +203,12 @@ def parse_args():
         description="Time LWLocks in PostgreSQL",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("path", type=str, help="path to target binary")
-    parser.add_argument("-p", "--pid", type=int, default=-1,
-            help="trace this PID only")
-    parser.add_argument("-d", "--debug", action='store_true', default=False,
-            help="debug mode")
+    parser.add_argument(
+        "-p", "--pid", type=int, default=-1,
+        help="trace this PID only")
+    parser.add_argument(
+        "-d", "--debug", action='store_true', default=False,
+        help="debug mode")
 
     return parser.parse_args()
 

@@ -4,8 +4,8 @@
 #                   For Linux, uses BCC, eBPF.
 #                   To trace only inside a particular container, you can use
 #                   --container option (that will assume docker), you need to
-#                   provide a namespace identificator. In case of docker container
-#                   to get one you can first check out container Pid:
+#                   provide a namespace identificator. In case of a docker
+#                   container to get one you can first check out container Pid:
 #
 #                      docker inspect postgres_test --format='{{.State.Pid}}'
 #
@@ -18,15 +18,17 @@
 
 from __future__ import print_function
 import argparse
-from bcc import BPF, PerfType, PerfHWConfig
+
 import signal
 from time import sleep
+
+from bcc import BPF
 
 import utils
 
 
 # load BPF program
-bpf_text="""
+bpf_text = """
 #include <linux/ptrace.h>
 #include <uapi/linux/bpf_perf_event.h>
 
@@ -44,22 +46,22 @@ typedef uint64 XLogRecPtr;
 
 typedef struct XLogRecData
 {
-    struct XLogRecData *next;    /* next struct in chain, or NULL */
-    char               *data;            /* start of rmgr data to include */
-    uint32              len;            /* length of rmgr data to include */
+    struct XLogRecData *next;   /* next struct in chain, or NULL */
+    char               *data;   /* start of rmgr data to include */
+    uint32              len;    /* length of rmgr data to include */
 } XLogRecData;
 
 typedef struct XLogRecord
 {
-	uint32		xl_tot_len;		/* total len of entire record */
-	TransactionId xl_xid;		/* xact id */
-	XLogRecPtr	xl_prev;		/* ptr to previous record in log */
-	uint8		xl_info;		/* flag bits, see below */
-	RmgrId		xl_rmid;		/* resource manager for this record */
-	/* 2 bytes of padding here, initialize to zero */
-	pg_crc32c	xl_crc;			/* CRC for this record */
+    uint32        xl_tot_len;   /* total len of entire record */
+    TransactionId xl_xid;       /* xact id */
+    XLogRecPtr    xl_prev;      /* ptr to previous record in log */
+    uint8         xl_info;      /* flag bits, see below */
+    RmgrId        xl_rmid;      /* resource manager for this record */
+    /* 2 bytes of padding here, initialize to zero */
+    pg_crc32c     xl_crc;       /* CRC for this record */
 
-	/* XLogRecordBlockHeaders and XLogRecordDataHeader follow, no padding */
+    /* XLogRecordBlockHeaders and XLogRecordDataHeader follow, no padding */
 
 } XLogRecord;
 
@@ -136,7 +138,7 @@ void probe_exec_simple_query_finish(struct pt_regs *ctx)
 
 
 # signal handler
-def signal_ignore(signal, frame):
+def signal_ignore(sig, frame):
     print()
 
 
@@ -207,19 +209,24 @@ def run(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Summarize cache references and misses by postgres backend",
+        description="Summarize WAL written by postgres backend",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("path", type=str, help="path to PostgreSQL binary")
-    parser.add_argument("-p", "--pid", type=int, default=-1,
-            help="trace this PID only")
-    parser.add_argument("-c", "--container", type=str,
-            help="trace this container only")
-    parser.add_argument("-n", "--namespace", type=int,
-            help="trace this namespace only")
-    parser.add_argument("-i", "--interval", type=int, default=5,
-            help="after how many seconds output the result")
-    parser.add_argument("-d", "--debug", action='store_true', default=False,
-            help="debug mode")
+    parser.add_argument(
+        "-p", "--pid", type=int, default=-1,
+        help="trace this PID only")
+    parser.add_argument(
+        "-c", "--container", type=str,
+        help="trace this container only")
+    parser.add_argument(
+        "-n", "--namespace", type=int,
+        help="trace this namespace only")
+    parser.add_argument(
+        "-i", "--interval", type=int, default=5,
+        help="after how many seconds output the result")
+    parser.add_argument(
+        "-d", "--debug", action='store_true', default=False,
+        help="debug mode")
 
     return parser.parse_args()
 

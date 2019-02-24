@@ -7,12 +7,11 @@
 
 from __future__ import print_function
 from time import sleep
-from bcc import BPF, USDT
+from bcc import BPF
 
 import argparse
 import ctypes as ct
 import signal
-import sys
 
 
 text = """
@@ -61,11 +60,14 @@ int probe_blk_throtl_bio(struct pt_regs *ctx)
 
 
 def attach(event_name, bpf, args):
-    bpf.attach_kretprobe(event="blk_throtl_bio", fn_name="probe_blk_throtl_bio")
+    bpf.attach_kretprobe(
+        event="blk_throtl_bio",
+        fn_name="probe_blk_throtl_bio"
+    )
 
 
 # signal handler
-def signal_ignore(signal, frame):
+def signal_ignore(sig, frame):
     print()
 
 

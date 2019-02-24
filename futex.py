@@ -16,46 +16,45 @@ from bcc import BPF
 import argparse
 import ctypes as ct
 import signal
-import sys
 
 
 bpf_text = """
 #include <linux/ptrace.h>
 
 struct futex_hash_bucket {
-	atomic_t waiters;
-	spinlock_t lock;
-	struct plist_head chain;
+        atomic_t waiters;
+        spinlock_t lock;
+        struct plist_head chain;
 };
 
 union futex_key {
-	struct {
-		unsigned long pgoff;
-		struct inode *inode;
-		int offset;
-	} shared;
-	struct {
-		unsigned long address;
-		struct mm_struct *mm;
-		int offset;
-	} private;
-	struct {
-		unsigned long word;
-		void *ptr;
-		int offset;
-	} both;
+        struct {
+        unsigned long pgoff;
+        struct inode *inode;
+        int offset;
+    } shared;
+    struct {
+        unsigned long address;
+        struct mm_struct *mm;
+        int offset;
+    } private;
+    struct {
+        unsigned long word;
+        void *ptr;
+        int offset;
+    } both;
 };
 
 struct futex_q {
-	struct plist_node list;
+    struct plist_node list;
 
-	struct task_struct *task;
-	spinlock_t *lock_ptr;
-	union futex_key key;
-	struct futex_pi_state *pi_state;
-	struct rt_mutex_waiter *rt_waiter;
-	union futex_key *requeue_pi_key;
-	u32 bitset;
+    struct task_struct *task;
+    spinlock_t *lock_ptr;
+    union futex_key key;
+    struct futex_pi_state *pi_state;
+    struct rt_mutex_waiter *rt_waiter;
+    union futex_key *requeue_pi_key;
+    u32 bitset;
 };
 
 struct futex_data {
@@ -77,8 +76,8 @@ BPF_PERF_OUTPUT(events);
  *
  */
 #define container_of(ptr, type, member) ({                      \
-	const typeof( ((type *)0)->member ) *__mptr = (ptr);    \
-	(type *)( (char *)__mptr - offsetof(type,member) );})
+    const typeof( ((type *)0)->member ) *__mptr = (ptr);    \
+    (type *)( (char *)__mptr - offsetof(type,member) );})
 
 void probe_unqueue_futex(struct pt_regs *ctx)
 {
@@ -164,10 +163,12 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Hash bucket size for futexes",
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("-l", "--size-limit", type=int, default=0,
-            help="Display only hash buckets with size more than this limit")
-    parser.add_argument("-d", "--debug", action='store_true', default=False,
-            help="debug mode")
+    parser.add_argument(
+        "-l", "--size-limit", type=int, default=0,
+        help="Display only hash buckets with size more than this limit")
+    parser.add_argument(
+        "-d", "--debug", action='store_true', default=False,
+        help="Debug mode")
 
     return parser.parse_args()
 
