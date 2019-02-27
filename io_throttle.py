@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 #
-# stacktrace    Track provided event in the kernel and print user/kernel stack
+# io_throttle   Track provided event in the kernel and print user/kernel stack
 #
-# usage: stacktrace -e event_name
+# usage: io_throttle -e event_name
 
 
 from __future__ import print_function
