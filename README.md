@@ -53,11 +53,14 @@ not higher level of accuracy, but anyway good for investigation).
 
 ### Miscellaneous
 
-    * `futex` to measure a hash bucket size for futexes to see how pgsemaphore are
-      affected by lock contention (since every bucket is protected by spin lock).
+`futex` to measure a hash bucket size for futexes to see how pgsemaphore are
+affected by lock contention (since every bucket is protected by spin lock).
 
-    * `stacktrace` convenient tool to check if some particular linux kernel
-      function was called and corresponding event is happened.
+`stacktrace` convenient tool to check if some particular linux kernel function
+was called and corresponding event is happened.
+
+`latency` shows the distribution of time, spent in PostgreSQL (between
+`query_execute_start` and `query_execute_done`).
 
 to run these script you need to have bcc installed and relatively new linux
 kernel.
